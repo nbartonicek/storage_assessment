@@ -1,0 +1,895 @@
+# Storage cleanup rules - the single source read by people AND by the classifier.
+# Read by scripts/cleanup_classifier.R; edit here to change how files are classified.
+#
+# How the rules are applied
+#  - Every file is checked against the rules from top to bottom; the FIRST rule that
+#    matches decides its colour. A file that matches nothing gets the default (R0).
+#  - Within one rule every listed condition must hold (AND). Alternatives (OR) are
+#    written as separate rules.
+#  - Colours are RECOMMENDATIONS. Nothing is deleted by the tool; every removal needs
+#    approval by the group leader or their designated delegate.
+#  - Everything is decided from metadata only (path, name, size, date) - no file is
+#    opened or read, and no checksums are computed.
+#
+# Matching keys a rule can use
+#   ext                 list of extensions, compression ignored (.fa matches x.fa.gz)
+#   name_regex          regular expression on the file name (case-insensitive)
+#   path_regex          regular expression on the path inside the project, starting "/"
+#   exclude_path_regex  rule does NOT apply when the path matches this
+#   min_mb / max_mb     size limits; a number or the name of a threshold below
+#   requires            list of conditions (see "conditions"); "!" in front = must be false
+# Any regex may instead name a shared pattern with "@name" (see "patterns").
+
+version: 0.7.0
+status: draft - for working group review
+last_changed: 2026-11-07
+changes:
+  0.7.0: Each file now also gets a file class, origin, lineage and folder idle time, kept separate from its colour. New rules - RNA-SeQC working files (G12, G12b, A10, A10b), Cell Ranger BAMs (G14, A11), external alignments and tracks (G7b), old BAMs with strong evidence of raw data (G13), old bigWig tracks (G15), Bismark context files (A12). Nextflow stage folders count as work folders. External accessions also cover ERR, DRR, SRX, ERX, GSM, PRJNA and PRJEB; a lab run ID in the path stops a file counting as external. BAM names such as x.fastq.gz_trimmed_bismark_bt2.bam now match their sample. Code and installed software no longer trigger the sensitivity suspicion check. Each file also gets a reproducibility tier; rules marked repro_gate go green only in a tier the committee has approved, and otherwise become A13. Alignments with no source (R2) are amber, not red. Holds on anything other than raw data show amber rather than red. From the all-researcher scans, imaging formats .ets, .im3, .dcm and .dax are protected instrument data, and encrypted downloads (.c4gh, .ncbi_enc) count as controlled. File names holding a tab no longer stop a scan being read in full. Added the retention requirements, retention matrix, privacy table and per-project data category, with required-record and legal-hold declarations in the register.
+  0.6.2: IGV TDF tracks are green (G10); MISO per-event files are green with a MISO summary in the project (G11), otherwise amber (A8); coverage files are amber (A9).
+  0.6.1: All SAM files are green (G2), with or without a BAM or FASTQ of the same sample; rule A3b removed. Sensitive projects still turn them amber.
+  0.6.0: BAM files can go green when several independent checks tie them to a raw FASTQ that stays recoverable (G8, otherwise A2b). Trimmed FASTQ with raw data available (G5), FastQC and trim_galore side files (G1g), bedGraph (G9) and SAM with a BAM or FASTQ of the same sample (G2) are green; external public FASTQ (G7) are green unless the project is active.
+  0.5.1: Raw FASTQ found in the sequencing repository (G4, A1) moved from raw data to redundant copies - the repository holds the raw data, so project status and retention no longer keep these copies red.
+  0.5.0: Every rule now belongs to a category (scratch, software, redundant copies, reference, raw data, regenerable intermediates, protected); added project status (active / inactive not published / inactive published) and default retention periods with their sources, for the cleanup simulator.
+  0.4.0: From the first full scan of one person's folders - added Spark/GATK temp (G1e), rMATS temp (G1f), public variant resources (G3d), snpEff databases (G3e), structure-prediction MSAs (A7); RSEM reference files added to G3b; A2 now also accepts trimmed FASTQ as the reads to regenerate from.
+  0.3.0: Added the sensitivity overlay for patient-derived, clinical and controlled-access data (project register; can only make colours more cautious).
+  0.2.0: Added duplication rules (copied folders, repeated large files, markdup/dedup, compressed and archived copies, merged lanes, SRA, Cell Ranger, software); hard links never count as copies.
+  0.1.0: First draft.
+
+thresholds:
+  repo_match_pct: 90        # % of a project's raw FASTQ bytes found in the repository for G4
+  active_months: 6          # project changed within this many months = Active
+  old_months: 24            # project unchanged for longer than this = Old (between = Inactive)
+  small_table_max_mb: 50    # tables/text up to this size are protected as metadata (P2)
+  big_object_min_mb: 1024   # R/Python objects from this size are reviewed (A3d)
+  reference_min_mb: 1       # reference sequence/annotation files from this size (G3a)
+  dup_min_mb: 100           # a file this big with the same name+size elsewhere = repeated copy (A6b)
+  folder_copy_pct: 95       # % of a folder's bytes found in another folder = folder copy (A6)
+  folder_copy_min_mb: 100   # folders smaller than this are not checked for copies
+  folder_copy_min_files: 3  # ... nor folders with fewer files than this
+  folder_key_min_mb: 1      # only files from this size are compared between folders
+  bam_size_min_pct: 50      # a BAM must be at least this % of its sample's raw FASTQ bytes (G8)
+  bam_size_max_pct: 200     # ... and at most this %
+  repo_sample_min_chars: 6  # sample names shorter than this are not looked up in the repository
+  trimmed_repo_max_pct: 120 # trimmed FASTQ must be at most this % of the repository's raw bytes (G5)
+  byproduct_idle_months: 6  # the second-level folder must be unchanged this long for by-products and external data
+  derived_min_years: 5      # BAM files and bigWig tracks must be at least this old (G13, G15)
+
+patterns:
+  nextflow_work: '(^|/)work/(stage-[0-9a-f-]+/)?[0-9a-f]{2}/[0-9a-f]{30}/'
+  tool_cache: '(^|/)(\.nextflow|\.snakemake|__MACOSX|_STARtmp|[^/]*_STARtmp|\.Trash-[0-9]+)/'
+  results_folder: '(^|/)(results?|figures?|figs|plots|reports?|manuscripts?|papers?|publications?)/'
+  reference_name: '(grch3[78]|hg1[89]|hg38|t2t|chm13|grcm3[89]|mm(9|10|39)|gencode|ensembl|refseq|ucsc|igenomes|homo_?sapiens|mus_?musculus)'
+  trimmed_fastq: '(trim|trimmed|_val_[12]|_paired|_unpaired|fastp)'
+  cellranger_internal: '(^|/)(SC|SPATIAL)_[A-Z0-9_]+_CS/'
+  spark_tmp: '(^|/)(blockmgr|spark)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/'
+  external_folder: '(^|/)GSE[^/]*/'
+  external_file: '^SRR'
+  external_accession: '(^|[^A-Za-z0-9])(SRR|ERR|DRR|SRX|ERX|GSM|GSE|PRJNA|PRJEB)[0-9]{4,}'
+  controlled_accession: '(^|[^A-Za-z0-9])(EGA[DFSN][0-9]{6,}|phs[0-9]{6})'
+  controlled_file: '\.(c4gh|ncbi_enc)$'
+  own_run: '(NB5[0-9]{5}|VH0[0-9]{4}|NS500|A0[0-9]{4})'
+  cellranger_bam: '(^|/)((cellsorted_)?possorted_genome_bam|(gex|atac)_possorted_bam|possorted_bam|phased_possorted_bam|sample_alignments)\.bam(\.bai)?$'
+  rnaseqc_root: '(^|/)rna-?seqc[^/]*/'
+  rnaseqc_summary: '(^|/)rna-?seqc[^/]*/(qc/)?[^/]+$'
+  bam_processed: '(merged?|filter|subset|downsampl|realign|recal|bqsr|split|primary|unique|blacklist|chr[0-9xym]|unmapped)'
+  software_env: '(^|/)(miniconda[23]?|anaconda[23]?|miniforge3?|mambaforge|micromamba|\.conda|conda/envs|envs/[^/]+/(bin|lib|conda-meta)|renv/library|R/[^/]*-library|site-library|\.local/lib/python[^/]*|\.cache|\.singularity|singularity_cache|\.apptainer)/'
+
+conditions:
+  project_active: Project changed within the last {active_months} months (newest file, ignoring tool caches).
+  project_has_code: Project contains scripts or a pipeline (any file matching rule P1).
+  project_has_reads: Project still contains FASTQ files - raw or trimmed - to regenerate alignments from.
+  repo_match: A file with the same name AND exact byte size exists in the sequencing repository list.
+  project_repo_pct_ok: At least {repo_match_pct} % of the project's raw FASTQ bytes match the repository.
+  miso_has_summary: The project holds a MISO summary file (.miso_summary).
+  external_fastq: A FASTQ whose origin is external - a folder starting with capital GSE (including the project's own folder), a name starting with capital SRR, or a public accession anywhere in the path - with no lab run ID in the path. Unlike other patterns, case matters here.
+  external_derived: A BAM, CRAM, index or track whose origin is external (as above), in a folder that has been idle for {byproduct_idle_months} months.
+  folder_idle: The second-level folder (the first folder inside the project) has not changed for {byproduct_idle_months} months, ignoring tool caches. Files directly in the project use the project.
+  rnaseqc_working: An RNA-SeQC file other than a BAM, its index, or a run summary. Run summaries sit directly in the RNA-SeQC folder or its QC folder.
+  rnaseqc_bam: A BAM or index inside an RNA-SeQC folder.
+  rnaseqc_summary_kept: The RNA-SeQC run still holds metrics.tsv, report.html or countMetrics.html.
+  rnaseqc_bam_has_source: The same sample ({repo_sample_min_chars}+ characters) has a BAM outside RNA-SeQC in the project, a raw FASTQ in the project, or a sample in the repository.
+  cellranger_has_results: The Cell Ranger BAM sits beside its filtered matrix or molecule_info.h5.
+  derived_strong_evidence: This BAM (or the BAM an index belongs to) has a sample name of {repo_sample_min_chars}+ characters and raw FASTQ in one folder of the project, or failing that of the repository; is not older than that FASTQ; and is {bam_size_min_pct}-{bam_size_max_pct} % of its size.
+  never: Always false. Used by rule A13, which files only reach through the reproducibility gate.
+  derived_old: The file itself is at least {derived_min_years} years old.
+  trimmed_has_raw: A raw FASTQ of the same sample is in the project, or in exactly one repository folder at a size it could have been trimmed from (at most {trimmed_repo_max_pct} %).
+  bam_sample_match: A raw FASTQ of the same sample is in the project; failing that, the repository holds that sample name ({repo_sample_min_chars}+ characters).
+  bam_regenerable: This BAM (or the BAM an index belongs to) passes every check - raw FASTQ of its sample in one folder of the project, or failing that of the repository; its sample has BAMs in one folder only; it is not older than the FASTQ; its size is {bam_size_min_pct}-{bam_size_max_pct} % of the FASTQ's; its name shows no merging, filtering or similar; and the project has scripts.
+  bam_has_sorted: A sorted version of this BAM exists in the same folder (x.sorted.bam, x.sort.bam, x_sorted.bam, Aligned.sortedByCoord.out.bam).
+  star_index_dir: The folder is a STAR genome index (it contains a file called SAindex).
+  bam_has_markdup: A duplicate-MARKED version of this BAM exists in the same folder (x.markdup.bam, x.md.bam, x_markdup.bam) - it keeps every read, only flagged.
+  bam_has_dedup: A duplicate-REMOVED version of this BAM exists in the same folder (x.dedup.bam, x.rmdup.bam, x_dedup.bam) - it has fewer reads.
+  has_compressed_copy: A compressed copy of this file (same name + .gz/.bz2/.xz/.zst) exists in the same folder.
+  archive_has_extracted: This archive (.tar, .tar.gz, .tgz, .tar.bz2, .zip) sits next to a folder with the same name - it was probably unpacked.
+  sra_has_fastq: This SRA download (.sra) has FASTQ files starting with the same accession in the project.
+  lanes_merged: This is a per-lane FASTQ (_L001.._L008) and a FASTQ elsewhere in the project has EXACTLY the summed size of all its lanes - the lanes were concatenated into it.
+  in_folder_copy: The file sits in a folder whose files (>= {folder_key_min_mb} MB, same relative path and exact size) make up >= {folder_copy_pct} % of another folder - a copied folder. The copy kept is the one in a project with scripts, else the older, else the shorter path.
+  extra_copy_large: A file of >= {dup_min_mb} MB with the same name and exact size exists elsewhere in this person's folders, and this is not the copy to keep (same preference as above). Hard links (same inode) are not copies.
+
+# Categories group the rules by WHY data may go; the cleanup simulator shows one slider
+# per rule, grouped by these. Which categories are held back depends on the project's
+# status (see "project_status").
+categories:
+  - id: scratch
+    label: Scratch and tool caches
+    description: Temporary files written by pipelines and tools; never needed after the run.
+  - id: redundant
+    label: Redundant copies
+    description: A second copy of data that exists elsewhere - in the same folders or in the sequencing repository.
+  - id: reference
+    label: Public reference data
+    description: Genomes, annotations, indexes and databases that can be downloaded again.
+  - id: software
+    label: Software and environments
+    description: Reinstallable software (conda, R/Python libraries, containers).
+  - id: derived
+    label: Derived and side files
+    description: Files produced from other data that no project status holds back - QC side files, text tracks, SAM and trimmed reads.
+  - id: external
+    label: External public data
+    description: FASTQ downloaded from public archives. Held back only while the project is active.
+  - id: byproduct
+    label: Workflow by-products
+    description: Working files a pipeline leaves behind whose results are kept elsewhere. No project status holds them back, but their folder must have been idle.
+  - id: regenerable
+    label: Regenerable alignments
+    description: BAM files tied by several checks to raw FASTQ that stays recoverable. Held back only while the project is active.
+  - id: raw
+    label: Raw sequencing data
+    description: Raw FASTQ - removable only when the sequencing repository holds the same file.
+  - id: intermediate
+    label: Regenerable intermediates
+    description: Alignments, trimmed reads, tracks and objects that can be rebuilt from raw data and scripts.
+  - id: protected
+    label: Protected
+    description: Code, results, documents, metadata, instrument raw data and anything unrecognised.
+
+# Reproducibility tiers: how strong the metadata evidence is that a file could be remade.
+#   redundant  another copy exists, or it is a cache or reference that holds nothing unique
+#   validated  source reads recoverable, size and date checks pass, a pipeline record sits in the
+#              run's own folder tree, and the name shows no further processing
+#   presumed   source reads recoverable and checks pass, but the record is only at project level,
+#              missing, or the file was further processed
+#   weak       a source was found but a check failed
+#   none       no source was found
+# Metadata is evidence, not proof, and no scanned file is ever opened, because that could recall it
+# from the archive. green_tiers is a policy choice for the committee: adding "presumed"
+# adopts a presumption that such files can be remade.
+reproducibility:
+  green_tiers: [redundant, validated]
+  fallback_rule: A13
+
+# File class says what a file IS and is separate from its colour. It decides nothing by itself:
+# reports use it to group files, and rules decide colours. First match wins, using the same
+# match keys as rules. A file matching nothing is "unknown".
+file_classes:
+  - {id: software, match: {path_regex: '@software_env'}}
+  - {id: software, match: {ext: [.sif, .simg]}}
+  - {id: reference, match: {ext: [.fa, .fasta, .fna, .gtf, .gff, .gff3, .2bit], path_regex: '@reference_name', min_mb: reference_min_mb}}
+  - {id: reference, match: {ext: [.fai, .dict, .amb, .ann, .bwt, .pac, .sa, .bt2, .bt2l, .ebwt, .ht2, .seq, .ti, .grp, .chrlist], path_regex: '@reference_name'}}
+  - {id: reference, match: {requires: [star_index_dir]}}
+  - {id: reference, match: {path_regex: '(^|/)snpeff_data/'}}
+  - {id: primary, match: {ext: [.sbatch, .slurm, .r, .rmd, .qmd, .py, .ipynb, .sh, .bash, .nf, .smk, .wdl, .cwl, .pl, .jl, .m, .c, .cpp, .java, .sql, .config, .def, .lock]}}
+  - {id: primary, match: {name_regex: '^(Snakefile|Makefile|Dockerfile|Singularity|DESCRIPTION|environment\.ya?ml|requirements\.txt)$'}}
+  - {id: primary, match: {path_regex: '(^|/)\.git/'}}
+  - {id: byproduct, match: {path_regex: '@nextflow_work'}}
+  - {id: byproduct, match: {path_regex: '@tool_cache'}}
+  - {id: byproduct, match: {path_regex: '@cellranger_internal'}}
+  - {id: byproduct, match: {path_regex: '@spark_tmp'}}
+  - {id: byproduct, match: {path_regex: '@cellranger_bam'}}
+  - {id: byproduct, match: {requires: [rnaseqc_working]}}
+  - {id: byproduct, match: {requires: [rnaseqc_bam]}}
+  - {id: byproduct, match: {ext: [.sam, .rmats, .miso, .c2t, .tmp]}}
+  - {id: byproduct, match: {path_regex: '(_fastqc\.(html|zip)$|_fastqc/|_trimming_report\.txt$|fastp\.(json|html)$|_STARgenome/|_STARpass1/|Unmapped\.out\.mate|(^|/)(CpG|CHG|CHH)_(OT|CTOT|OB|CTOB|context)_)'}}
+  - {id: byproduct, match: {requires: [bam_has_sorted]}}
+  - {id: byproduct, match: {requires: [bam_has_markdup]}}
+  - {id: byproduct, match: {requires: [bam_has_dedup]}}
+  - {id: byproduct, match: {requires: [has_compressed_copy]}}
+  - {id: byproduct, match: {requires: [archive_has_extracted]}}
+  - {id: byproduct, match: {requires: [lanes_merged]}}
+  - {id: primary, match: {ext: [.tif, .tiff, .czi, .nd2, .lif, .lsm, .oib, .oir, .ims, .vsi, .ets, .im3, .dcm, .dax, .svs, .fcs, .raw, .wiff, .mzml, .mzxml, .bcl, .cbcl, .pod5, .fast5, .blow5, .slow5, .sra]}}
+  - {id: primary, match: {ext: [.fastq, .fq], name_regex: '^(?!.*@trimmed_fastq)'}}
+  - {id: derived, match: {ext: [.fastq, .fq]}}
+  - {id: derived, match: {ext: [.bam, .cram, .bai, .crai, .csi, .bedgraph, .bdg, .bw, .bigwig, .wig, .tdf, .cov, .vcf, .tbi, .narrowpeak, .broadpeak, .a3m]}}
+  - {id: result, match: {ext: [.pdf, .png, .svg, .jpg, .jpeg, .eps, .html, .docx, .doc, .pptx, .ppt, .xlsx, .xls, .rds, .rdata, .rda, .qs, .pkl, .pickle, .h5ad, .h5, .loom, .mtx, .csv, .tsv, .txt, .tab, .gct, .bed, .json, .yaml, .yml, .xml, .md, .cloupe, .matrix, .log, .out, .list]}}
+
+# Project status, chosen per project by its owner (the simulator suggests one from the
+# dates: Active if anything changed within {active_months} months, else Inactive - not
+# published). For each status:
+#   clock  - when the retention period starts: never (still running), at the last change
+#            (stand-in for completion), or at the publication year the owner enters
+#   locked - categories kept until the retention period has passed (always, while Active)
+project_status:
+  - id: active
+    label: Active
+    description: Work is ongoing - raw data and intermediates are still in use.
+    clock: none
+    locked: [raw, intermediate, external, regenerable]
+  - id: inactive_unpublished
+    label: Inactive - not published
+    description: Finished or paused, results not (yet) published - the data may still be needed for a paper.
+    clock: last_change
+    locked: [raw, intermediate]
+  - id: inactive_published
+    label: Inactive - published
+    description: Results are published - raw data must be kept for the retention period after publication; regenerable intermediates may go, since raw data and code reproduce them.
+    clock: publication
+    locked: [raw]
+
+# Retention defaults for the cleanup simulator. File metadata cannot show publication or
+# completion dates, so the app uses "time since the project last changed" as a stand-in.
+# These are the national / Victorian minimums as found; your institution's own policy and each
+# project's ethics approval override them (to be confirmed with research governance).
+retention:
+  nonsensitive_years: 5    # Australian Code guide: minimum 5 years after publication / completion
+  sensitive_years: 15      # clinical-trial datasets: minimum 15 years after completion
+  sources:
+    - 'NHMRC/ARC/UA (2019) Management of Data and Information in Research - guide supporting the Australian Code for the Responsible Conduct of Research (2018): minimum 5 years from publication.'
+    - 'University of Melbourne records authority under the Victorian Public Records Act 1973: clinical trial datasets 15 years after completion; datasets involving minors 15 years after the child turns 18; datasets of community significance (incl. gene therapy) permanent; other datasets 5 years after completion.'
+    - 'PROV PROS 12/05 (Statewide Health Services) covers research and clinical-trial records of Victorian public health services; its research classes set the binding disposal periods - check with the records manager.'
+    - 'Health Records Act 2001 (Vic), HPP 4.2: clinical health records 7 years after last contact; for minors until age 25. Applies to clinical records, not research copies.'
+
+rules:
+
+  # --- Stage 1: tool caches. Everything inside is a copy or scratch by construction,
+  #     so these come before the protection rules (a cached copy of a script is not the script).
+  - id: G1
+    colour: green
+    category: scratch
+    title: Nextflow work folders of finished projects
+    match:
+      path_regex: '@nextflow_work'
+      requires: ['!project_active']
+    why: Nextflow keeps per-task scratch copies here; final outputs are published elsewhere (results/).
+    caveat: Delete only after the run's results are confirmed published. Breaks -resume for that run.
+
+  - id: A0
+    colour: amber
+    category: scratch
+    title: Nextflow work folders of active projects
+    match:
+      path_regex: '@nextflow_work'
+      requires: ['project_active']
+    why: Same as G1, but the pipeline may still be resumed.
+    caveat: Check no run is in progress or will be resumed.
+
+  - id: G1b
+    colour: green
+    category: scratch
+    title: Other tool caches and system clutter
+    match:
+      path_regex: '@tool_cache'
+    why: Temporary folders written by tools (Nextflow/Snakemake metadata, STAR temp, macOS zip debris, trash).
+
+  - id: G1c
+    colour: green
+    category: scratch
+    title: macOS metadata files
+    match:
+      name_regex: '^(\.DS_Store|\._.+)$'
+    why: Finder and SMB side files; recreated automatically when needed.
+
+  - id: G1d
+    colour: green
+    category: scratch
+    title: Cell Ranger / Space Ranger internal working folders
+    match:
+      path_regex: '@cellranger_internal'
+    why: The pipeline's own scratch (e.g. SC_RNA_COUNTER_CS/); the results are in outs/.
+    caveat: Check outs/ exists and is complete before removing.
+
+  - id: G1e
+    colour: green
+    category: scratch
+    title: Spark / GATK shuffle temp folders
+    match:
+      path_regex: '@spark_tmp'
+    why: Spark-based tools (e.g. GATK MarkDuplicatesSpark) write blockmgr-<id>/ and spark-<id>/ scratch and delete it on a clean exit; folders left behind are from killed or crashed runs and are never read again. Often a large share of the FILE COUNT.
+    caveat: Check no Spark/GATK job is running in that project right now.
+
+  - id: G1f
+    colour: green
+    category: scratch
+    title: rMATS temporary files
+    match:
+      ext: [.rmats]
+    why: rMATS intermediate files (its --tmp folder); the splicing results are in the *.MATS.*.txt tables.
+    caveat: Needed only to re-run rMATS's statistics step without re-reading the BAMs.
+
+  - id: G1g
+    colour: green
+    category: derived
+    title: FastQC and trim_galore side files
+    match:
+      path_regex: '(_fastqc\.(html|zip)$|_fastqc/|_trimming_report\.txt$|fastp\.(json|html)$)'
+    why: Quality reports and logs written beside the reads; rebuilt by running the tool again.
+    caveat: Keep any you need as a record of how samples were trimmed; MultiQC summaries are not covered by this rule.
+
+  - id: A5
+    colour: amber
+    category: software
+    title: Software environments and caches (conda, R/Python libraries, container caches)
+    match:
+      path_regex: '@software_env'
+    why: Reinstallable software; often a large share of the FILE COUNT as well as space.
+    caveat: Export the environment first (conda env export, renv.lock) so the analysis stays reproducible.
+
+  - id: A5b
+    colour: amber
+    category: software
+    title: Container images
+    match:
+      ext: [.sif, .simg]
+    why: Usually pulled from a registry and re-downloadable; frequently duplicated per project.
+    caveat: A custom-built image may be the only copy - keep its definition file (.def) at least.
+
+  # --- Stage 2: things that must never be offered for removal.
+  - id: P1
+    colour: red
+    category: protected
+    title: Scripts, pipelines and environments
+    match:
+      ext: [.sbatch, .slurm, .r, .rmd, .qmd, .py, .ipynb, .sh, .bash, .nf, .smk, .wdl, .cwl, .pl, .jl, .m, .c, .cpp, .java, .sql, .config, .def, .lock]
+    why: Code is small and is what makes everything else reproducible.
+
+  - id: P1b
+    colour: red
+    category: protected
+    title: Pipeline and environment files without a script extension
+    match:
+      name_regex: '^(Snakefile|Makefile|Dockerfile|Singularity|DESCRIPTION|environment\.ya?ml|requirements\.txt)$'
+    why: As P1.
+
+  - id: P1c
+    colour: red
+    category: protected
+    title: Git repositories
+    match:
+      path_regex: '(^|/)\.git/'
+    why: Version history of the code.
+
+  - id: P5
+    colour: red
+    category: protected
+    title: Instrument raw data (imaging, cytometry, mass spec, sequencer output)
+    match:
+      ext: [.tif, .tiff, .czi, .nd2, .lif, .lsm, .oib, .oir, .ims, .vsi, .ets, .im3, .dcm, .dax, .svs, .fcs, .raw, .wiff, .mzml, .mzxml, .bcl, .cbcl, .pod5, .fast5, .blow5, .slow5]
+    why: Primary data that usually exists nowhere else.
+
+  # --- Stage 3a: pipeline working files that have a recognised summary or result.
+  - id: G12
+    colour: green
+    category: byproduct
+    title: RNA-SeQC working files with the run summary kept
+    match:
+      requires: [rnaseqc_working, rnaseqc_summary_kept, folder_idle]
+    why: Per-transcript depth files (perBaseDoC.out), per-sample intron, exon and chimeric tables, per-sample reports and GC annotation subsets from RNA-SeQC runs. The run's metrics.tsv and reports stay.
+    caveat: Rerunning needs the BAM and the same annotation, and RNA-SeQC 1.x is an old Java tool; version 2 can reproduce its counts and most metrics with --legacy but not this file layout.
+
+  - id: A10
+    colour: amber
+    category: byproduct
+    title: RNA-SeQC working files with no summary, or a folder in use
+    match:
+      requires: [rnaseqc_working]
+    why: Either no run summary was found, so these may be the only record of the QC, or the folder changed recently.
+
+  - id: G12b
+    colour: green
+    repro_gate: true
+    category: byproduct
+    title: BAM copies inside RNA-SeQC runs, with a source found
+    match:
+      requires: [rnaseqc_bam, rnaseqc_bam_has_source, rnaseqc_summary_kept, folder_idle]
+    why: Read-group and duplicate-marked BAMs made to feed RNA-SeQC. The same sample has a BAM outside RNA-SeQC, or raw FASTQ in the project or repository.
+    caveat: The purpose of these BAMs is inferred from their names (_rgadded, dups_marked_rgadded) and their folder; no header is read.
+
+  - id: A10b
+    colour: amber
+    category: byproduct
+    title: BAM files inside RNA-SeQC runs with no source found
+    match:
+      requires: [rnaseqc_bam]
+    why: No other BAM or raw FASTQ of this sample was found, so this may be the only copy of the alignments.
+
+  - id: G14
+    colour: green
+    repro_gate: true
+    category: byproduct
+    title: Cell Ranger BAMs beside their results
+    match:
+      ext: [.bam, .bai]
+      path_regex: '@cellranger_bam'
+      requires: [cellranger_has_results, folder_idle]
+    why: Matrices and molecule_info.h5 hold the results most analyses use; the BAM is a large by-product of the run.
+    caveat: These BAMs contain the reads, and FASTQ can be recovered from them with bamtofastq. Names cannot tie a run to its FASTQ, so check the FASTQ is kept before removal. Also needed for velocity, some variant calling and re-counting.
+
+  - id: A11
+    colour: amber
+    category: byproduct
+    title: Cell Ranger BAMs with no results beside them, or a folder in use
+    match:
+      ext: [.bam, .bai]
+      path_regex: '@cellranger_bam'
+    why: The run looks incomplete, or the folder changed recently.
+
+  # --- Stage 3: redundant copies and reference data.
+  - id: G2
+    colour: green
+    repro_gate: true
+    category: derived
+    title: SAM files
+    match:
+      ext: [.sam]
+    why: A large uncompressed alignment format that is not kept as a final product. Sensitive projects turn these amber.
+    caveat: Also applies when no BAM or FASTQ of the sample is found, where it may be the only copy of those alignments, and in active projects, where a file may still be being written.
+
+  - id: G2b
+    colour: green
+    category: redundant
+    title: Unsorted BAM files that also have a sorted version
+    match:
+      ext: [.bam]
+      requires: [bam_has_sorted]
+    why: The sorted BAM contains the same reads; the unsorted one is an intermediate.
+    caveat: Same folder and matching name only; sizes are not compared.
+
+  - id: G2c
+    colour: green
+    category: redundant
+    title: BAM files that also have a duplicate-marked version
+    match:
+      ext: [.bam]
+      requires: [bam_has_markdup]
+    why: Marking duplicates keeps every read and only adds a flag, so the marked BAM contains everything.
+
+  - id: A4a
+    colour: amber
+    category: redundant
+    title: BAM files that also have a duplicate-removed version
+    match:
+      ext: [.bam]
+      requires: [bam_has_dedup]
+    why: The deduplicated BAM has fewer reads; the original can usually be regenerated from raw data.
+    caveat: Not a pure copy - some analyses need the reads that were removed.
+
+  - id: A4b
+    colour: amber
+    category: redundant
+    title: Uncompressed files that also exist compressed
+    match:
+      requires: [has_compressed_copy]
+    why: e.g. x.fastq next to x.fastq.gz, x.vcf next to x.vcf.gz - same content, stored twice.
+    caveat: Check the compressed copy is complete (an interrupted gzip leaves a truncated file).
+
+  - id: A4c
+    colour: amber
+    category: redundant
+    title: Archives that were also unpacked
+    match:
+      requires: [archive_has_extracted]
+    why: The same content is stored packed and unpacked.
+    caveat: The unpacked folder may have been changed since - decide which one to keep.
+
+  - id: G6
+    colour: green
+    category: redundant
+    title: SRA downloads already converted to FASTQ
+    match:
+      ext: [.sra]
+      requires: [sra_has_fastq]
+    why: Public data, re-downloadable from SRA/ENA; the FASTQs are already here.
+
+  - id: G3a
+    colour: green
+    category: reference
+    title: Reference genome sequences and annotations
+    match:
+      ext: [.fa, .fasta, .fna, .gtf, .gff, .gff3, .2bit]
+      path_regex: '@reference_name'
+      min_mb: reference_min_mb
+    why: Public references can be downloaded again and are kept centrally.
+    caveat: Recognised by name only (GRCh38, hg38, mm10, gencode, ...). A custom or modified reference with such a name would be misclassified - reviewers should check.
+
+  - id: G3b
+    colour: green
+    category: reference
+    title: Reference indexes (bwa, bowtie, hisat2, samtools/picard, RSEM)
+    match:
+      ext: [.fai, .dict, .amb, .ann, .bwt, .pac, .sa, .bt2, .bt2l, .ebwt, .ht2, .seq, .ti, .grp, .chrlist]
+      path_regex: '@reference_name'
+    why: Rebuilt from the reference with one command, or available centrally.
+
+  - id: G3c
+    colour: green
+    category: reference
+    title: STAR genome index folders
+    match:
+      requires: [star_index_dir]
+    why: Rebuilt from the reference and annotation, or available centrally.
+
+  - id: G3d
+    colour: green
+    category: reference
+    title: Public variant resources (gnomAD, 1000 Genomes, dbSNP, Mills, HapMap, panels of normals)
+    match:
+      ext: [.vcf, .tbi, .idx]
+      name_regex: '(gnomad|1000g|dbsnp|mills|hapmap|omni2\.5|known_indels|exac|1000g_pon|panel_of_normals)'
+    why: GATK resource bundle and similar public files; re-downloadable.
+    caveat: Recognised by name only. A panel of normals built in-house from your own samples is NOT public - reviewers should check.
+
+  - id: G3e
+    colour: green
+    category: reference
+    title: snpEff databases
+    match:
+      path_regex: '(^|/)snpeff_data/'
+    why: Downloaded with snpEff download <genome>; often copied into every results folder.
+
+  - id: G9
+    colour: green
+    repro_gate: true
+    category: derived
+    title: bedGraph coverage tracks
+    match:
+      ext: [.bedgraph, .bdg]
+    why: Large text tracks, quickly rebuilt from the alignments; BigWig is the form to keep.
+    caveat: Also applies in active projects, where a file may still be being written.
+
+  # --- Stage 4: raw sequencing data.
+  - id: G7
+    colour: green
+    category: external
+    title: External public FASTQ (GSE folders, SRR files)
+    match:
+      ext: [.fastq, .fq]
+      requires: [external_fastq]
+    why: Downloaded from a public archive and can be downloaded again. Stays red while the project is active.
+    caveat: Recognised by name only. Controlled-access SRR files, or a lab's own data placed in a GSE folder, need checking; check the accession is recorded before removal.
+
+  - id: G7b
+    colour: green
+    repro_gate: true
+    category: external
+    title: External alignments and tracks in idle folders
+    match:
+      ext: [.bam, .cram, .bai, .crai, .csi, .bedgraph, .bdg, .bw, .bigwig, .wig, .tdf]
+      requires: [external_derived]
+    why: Made from reads that can be downloaded again. Stays red while the project is active.
+    caveat: Recognised by accession only. Regenerating needs the same reference, software and parameters, and an accession may be the lab's own submission.
+
+  - id: G4
+    colour: green
+    category: redundant
+    title: Raw FASTQ in a project that is (almost) fully in the repository
+    match:
+      ext: [.fastq, .fq]
+      name_regex: '^(?!.*@trimmed_fastq)'
+      requires: [repo_match, project_repo_pct_ok]
+    why: The same file name with the exact same size exists in the sequencing repository, and so does at least {repo_match_pct} % of this project's raw data.
+    caveat: Name + size is strong evidence but not proof of identical content (no checksums). Requires the repository copy to be retained long-term - to be confirmed by the sequencing facility.
+
+  - id: A1
+    colour: amber
+    category: redundant
+    title: Raw FASTQ found in the repository, in a project that is only partly there
+    match:
+      ext: [.fastq, .fq]
+      name_regex: '^(?!.*@trimmed_fastq)'
+      requires: [repo_match]
+    why: This file matches the repository, but much of the project's raw data does not - check why before removing.
+
+  - id: G2e
+    colour: green
+    category: redundant
+    title: Per-lane FASTQs that were merged into one file
+    match:
+      ext: [.fastq, .fq]
+      requires: [lanes_merged]
+    why: The merged FASTQ has exactly the summed size of the lanes (gzip files concatenate byte for byte), so it holds the same reads.
+    caveat: Keep the lane files if the merged file is not in the repository and per-lane QC is needed.
+
+  - id: G5
+    colour: green
+    repro_gate: true
+    category: derived
+    title: Trimmed or filtered FASTQ with raw data available
+    match:
+      ext: [.fastq, .fq]
+      name_regex: '@trimmed_fastq'
+      requires: [trimmed_has_raw]
+    why: Produced from raw FASTQ by a trimming step, and that sample's raw FASTQ is in the project or the repository.
+    caveat: Keep the trimming settings so the step can be repeated.
+
+  - id: A3a
+    colour: amber
+    category: derived
+    title: Trimmed or filtered FASTQ with no raw data found
+    match:
+      ext: [.fastq, .fq]
+      name_regex: '@trimmed_fastq'
+    why: No raw FASTQ of this sample was found, so this may be the only copy of the reads.
+
+  - id: A6
+    colour: amber
+    category: redundant
+    title: Files in a copied folder
+    match:
+      requires: [in_folder_copy]
+    why: This folder's content also exists in another folder (same relative paths and exact sizes) - typically a copy-pasted project, backup or results_v2.
+    caveat: Name + size only, no content check. Scripts in copied folders stay protected (P1 is checked earlier).
+
+  - id: A6b
+    colour: amber
+    category: redundant
+    title: Large files that exist more than once
+    match:
+      requires: [extra_copy_large]
+    why: The same large file (name + exact size) is stored elsewhere in this person's folders.
+    caveat: Name + size only, no content check.
+
+  - id: R1
+    colour: red
+    category: raw
+    title: Raw FASTQ not found in the repository
+    match:
+      ext: [.fastq, .fq]
+    why: No repository copy with the same name and size - may be the only copy.
+
+  # --- Stage 5: reproducible and large intermediates.
+  - id: G8
+    colour: green
+    repro_gate: true
+    category: regenerable
+    title: BAM files tied to raw FASTQ that stays recoverable
+    match:
+      ext: [.bam, .bai]
+      requires: [bam_regenerable]
+    why: Every check ties this BAM to its sample's raw FASTQ, and the rules never make that FASTQ removable unless the repository or a public archive holds it. Stays red while the project is active.
+    caveat: Evidence, not proof, because BAM headers are never read (that would recall archived files). Regenerating also needs the same reference, software versions and parameters.
+
+  - id: G13
+    colour: green
+    repro_gate: true
+    category: regenerable
+    title: Old BAM files with strong evidence of raw data
+    match:
+      ext: [.bam, .bai]
+      requires: [derived_strong_evidence, derived_old]
+    why: At least {derived_min_years} years old, with raw FASTQ of the sample in one folder, not newer than the BAM and of a plausible size. Stays red while the project is active.
+    caveat: Evidence, not proof. Unlike G8, this also accepts processed BAMs, BAMs in several folders and projects with no scripts, so regenerating one may need more work.
+
+  - id: A2b
+    colour: amber
+    category: intermediate
+    title: BAM files matched to a sample but failing a check
+    match:
+      ext: [.bam, .bai]
+      requires: [bam_sample_match]
+    why: A raw FASTQ of this sample was found, but date, size, name, folders or scripts raise doubt that this BAM is simply made from it.
+
+  - id: A2
+    colour: amber
+    category: intermediate
+    title: Alignments (BAM/CRAM) in a project with scripts and FASTQs
+    match:
+      ext: [.bam, .cram, .bai, .crai, .csi]
+      requires: [project_has_code, project_has_reads]
+    why: Can in principle be regenerated from the FASTQs (raw or trimmed) with the project's scripts.
+    caveat: Regeneration also needs the same reference, software versions and parameters.
+
+  - id: R2
+    colour: amber
+    category: intermediate
+    title: Alignments without scripts or FASTQs in the project
+    match:
+      ext: [.bam, .cram, .bai, .crai, .csi]
+    why: Could not be regenerated from what is in this project, and may be the only copy. The owner decides; it becomes red if the project declares it a required record.
+
+  - id: G15
+    colour: green
+    repro_gate: true
+    category: regenerable
+    title: Old bigWig and wiggle tracks
+    match:
+      ext: [.bw, .bigwig, .wig]
+      requires: [derived_old]
+    why: At least {derived_min_years} years old and derived from alignments. Stays red while the project is active.
+    caveat: Names cannot tie a track to its reads, and regenerating may need the BAM to be rebuilt first.
+
+  - id: A3c
+    colour: amber
+    category: intermediate
+    title: Coverage tracks
+    match:
+      ext: [.bw, .bigwig, .wig]
+    why: Derived from alignments; usually reproducible.
+
+  - id: G10
+    colour: green
+    repro_gate: true
+    category: derived
+    title: IGV TDF tracks
+    match:
+      ext: [.tdf]
+    why: A display format for IGV, usually rebuilt from the BAM with one command; BigWig is the track format to keep.
+    caveat: Rebuilding needs the BAM, so check it is staying if the track is still wanted.
+
+  - id: A12
+    colour: amber
+    category: derived
+    title: Bismark context files
+    match:
+      name_regex: '^(CpG|CHG|CHH)_(OT|CTOT|OB|CTOB|context)_'
+    why: Per-read methylation calls from the Bismark extractor, rebuilt from the deduplicated BAM. Very large as text.
+    caveat: Check the coverage or bedGraph results and the BAM stay before removal.
+
+  - id: G11
+    colour: green
+    category: derived
+    title: MISO per-event files in a project with a MISO summary
+    match:
+      ext: [.miso]
+      requires: [miso_has_summary]
+    why: One small file per splicing event, often hundreds of thousands; the results are in the summary files, which stay protected.
+    caveat: The summary is matched at project level, not per sample. Needed only to re-run MISO comparisons or summaries without re-running MISO.
+
+  - id: A8
+    colour: amber
+    category: derived
+    title: MISO per-event files with no MISO summary
+    match:
+      ext: [.miso]
+    why: No summary was found in the project, so these may be the only record of the run.
+
+  - id: A9
+    colour: amber
+    category: derived
+    title: Coverage files
+    match:
+      ext: [.cov]
+    why: Could be rebuilt display data, or a methylation result such as Bismark output, which is not simply a display file.
+    caveat: Check what a file holds before removing it, and whether its BAM is staying.
+
+  - id: A3d
+    colour: amber
+    category: intermediate
+    title: Large R/Python objects outside results folders
+    match:
+      ext: [.rds, .rdata, .rda, .qs, .pkl, .pickle, .h5ad, .h5, .loom]
+      min_mb: big_object_min_mb
+      exclude_path_regex: '@results_folder'
+    why: Often intermediate snapshots of an analysis; may also be the only copy of a final object.
+
+  - id: A7
+    colour: amber
+    category: intermediate
+    title: Structure-prediction alignments (AlphaFold / ColabFold MSAs)
+    match:
+      ext: [.a3m]
+    why: Multiple sequence alignments made before structure prediction; reproducible from the protein sequence. The predicted structures and scores (.pdb, .json) stay protected.
+    caveat: Slow to recompute (hours of database search per protein) - keep them if more models of the same proteins are planned.
+
+  - id: A13
+    colour: amber
+    category: intermediate
+    title: Would be green, but not validated as reproducible
+    match:
+      requires: [never]
+    why: A green rule matched, but the file's reproducibility tier is not one the committee has approved, so a person reviews it.
+
+  # --- Stage 6: what to keep.
+  - id: P3
+    colour: red
+    category: protected
+    title: Results, figures and reports folders
+    match:
+      path_regex: '@results_folder'
+    why: Results are kept.
+
+  - id: P4
+    colour: red
+    category: protected
+    title: Documents and figures
+    match:
+      ext: [.html, .pdf, .docx, .doc, .pptx, .ppt, .png, .svg, .jpg, .jpeg, .eps]
+    why: Reports and figures are kept.
+
+  - id: P2
+    colour: red
+    category: protected
+    title: Small tables, sample sheets and metadata
+    match:
+      ext: [.csv, .tsv, .txt, .xlsx, .xls, .json, .yaml, .yml, .xml, .md]
+      max_mb: small_table_max_mb
+    why: Small, and often the only record of sample information.
+
+# Legal and policy tables below are as supplied for review. They are minimum benchmarks or proposed
+# policies, NOT a verified disposal schedule for any institution; confirm with the records manager and
+# research governance before relying on them.
+retention_requirements:
+  - {requirement: NHMRC ordinary research, period: 5 years minimum, clock: Publication date, applicability: National research-integrity guidance}
+  - {requirement: NHMRC most clinical trials, period: 15+ years, clock: Determined by applicable trial requirements, applicability: 'Guidance, not a universal statutory rule'}
+  - {requirement: Victorian higher-education ordinary datasets, period: 5 years, clock: Completion of research activity, applicability: 'PROS 16/07; not automatically your institution'}
+  - {requirement: Victorian higher-education clinical trial datasets, period: 15 years, clock: Completion of research activity, applicability: 'PROS 16/07; not automatically your institution'}
+  - {requirement: Victorian higher-education research involving minors, period: 15 years, clock: Child reaches 18, applicability: 'PROS 16/07; not automatically your institution'}
+  - {requirement: Victorian higher-education genetic research of specified significance, period: Permanent, clock: Not applicable, applicability: 'PROS 16/07; exact class and scope matter'}
+  - {requirement: Victorian health-service records, period: 'Generally 7 years after last service, or until age 25 for childhood records, whichever is later', clock: Last health service / patient's age, applicability: 'Health Records Act HPP 4.2, subject to other laws'}
+  - {requirement: HPC scratch intermediates, period: No universal statutory number, clock: Defined by approved scratch policy, applicability: '90 days can be an operational rule, not a legal retention period'}
+
+# Per-project data category. max_colour limits non-raw files; raw_red keeps all primary data red;
+# all_red keeps everything red. retention_years drives the hold on locked categories. The patient
+# value is a cautious placeholder because no universal period applies.
+data_categories:
+  - {id: legal_hold, label: Legal hold, max_colour: red, all_red: true, retention_years: .inf, raw: Preserve, derived: Preserve, scripts: Preserve}
+  - {id: diagnostic, label: Diagnostic pathology, max_colour: red, all_red: true, retention_years: .inf, raw: Separate NPAAC and clinical record requirements, derived: Different retention rules may apply to raw sequence data and reported variants, scripts: Laboratory validation and quality-system records follow their own schedules}
+  - {id: permanent_genetic, label: Genetic research of specified significance, max_colour: red, all_red: true, retention_years: .inf, raw: Permanent where the class applies, derived: Permanent where required, scripts: Retain}
+  - {id: clinical_trial, label: Clinical trials, max_colour: amber, raw_red: true, derived_red: true, retention_years: 15, raw: Often 15 years or longer under research guidance; trial-specific requirements may be longer, derived: Retain required evidence for the trial-specific period, scripts: Retain essential analytical code and trial documentation for the applicable period}
+  - {id: minors, label: Research involving minors, max_colour: amber, raw_red: true, derived_red: true, retention_years: .inf, raw: 15 years after the child reaches 18 where PROS 16/07 applies, derived: Same where part of the required record, scripts: Retain for the applicable period}
+  - {id: patient_published, label: Published patient/genomic research, max_colour: amber, retention_years: 15, raw: 'At least the applicable research retention period, potentially longer or permanent', derived: 'Same if required records; not automatically permanent merely because patient-derived', scripts: Retain relevant scripts and reproducibility information for the applicable period}
+  - {id: patient_unpublished, label: Unpublished patient/genomic research, max_colour: amber, retention_years: 15, raw: 'Applicable ethics, health-records and public-records schedules; no universal period', derived: Same obligations if part of the required record; regenerable intermediates may be transient, scripts: Retain analysis code needed to substantiate the research; restrict access if it contains sensitive information}
+  - {id: suspected_patient, label: Undeclared, path looks patient-derived, max_colour: amber, retention_years: 15, raw: Treated as patient data until declared, derived: Treated as patient data until declared, scripts: Retain}
+  - {id: ordinary_published, label: 'Published, non-sensitive research', max_colour: green, retention_years: 5, raw: 'At least 5 years after publication under national guidance, if part of the retained research record', derived: Same baseline if required to substantiate findings; otherwise may be disposable, scripts: 'Preserve relevant code, parameters and provenance for the applicable retention period'}
+  - {id: ordinary_unpublished, label: 'Unpublished, non-sensitive research', max_colour: green, retention_years: 5, raw: Retain while needed for research; no universal fixed number of years, derived: Temporary outputs may be deleted if reproducible and not required records, scripts: Retain versions needed to understand or reproduce results}
+
+# Privacy follows the kind of data, not whether a file is single-cell or bulk: the retention
+# framework is generally the same for every sequencing assay in this table.
+privacy_by_data_type:
+  - {type: Whole-genome DNA sequencing, sensitivity: Very high identification potential, retention: 'Applicable research, ethics or clinical retention schedule'}
+  - {type: Whole-exome DNA sequencing, sensitivity: High identification potential, retention: Generally same framework as WGS}
+  - {type: Bulk RNA-seq, sensitivity: Potentially identifiable; includes expressed genetic variants, retention: Generally same research retention framework}
+  - {type: Single-cell RNA-seq, sensitivity: Potentially identifiable; can reveal donor-specific variants and health information, retention: Generally same framework}
+  - {type: Spatial transcriptomics, sensitivity: Potentially identifiable; may include linked patient and tissue information, retention: Generally same framework}
+  - {type: Gene-expression count matrices, sensitivity: 'Often lower direct identification potential than raw reads, but may remain sensitive', retention: Same framework if part of the required research record}
+  - {type: Aggregated differential-expression results, sensitivity: Usually lower privacy risk if genuinely non-identifiable, retention: Same framework if required to substantiate research}
+
+# Sensitivity overlay - applied AFTER the rules above, per project.
+# Patient data cannot be recognised reliably from file metadata, so projects are DECLARED
+# in a project register (template: rules/project_register_template.tsv). The overlay can
+# only make a colour more cautious (green -> amber -> red), never less. The colour from
+# the rules is kept alongside, so reports show what the overlay changed.
+#  - A project may have several levels, joined by ";" (e.g. patient;controlled); all apply.
+#  - "none" is a declaration too: it switches the suspicion check (S0) off for that project.
+#  - Overlays are listed most cautious first; the first that applies sets the approver.
+#  - {custodian}, {ethics_ref}, {retention_until}, {dua_end} in notes are filled from the register.
+sensitivity:
+  default_approver: Group leader or designated delegate
+  # Undeclared projects with any path matching this look like patient or controlled data:
+  # EGA / dbGaP accessions, ANZCTR / ClinicalTrials.gov trial IDs, or telling words. Code and
+  # installed software are not evidence: a tool's source file named Tumor... says nothing of the data.
+  suspect_regex: '(EGA[DFSN][0-9]{11}|phs[0-9]{6}|ACTRN[0-9]{14}|NCT[0-9]{8}|patient|tumou?r|biops(y|ies)|clinical)'
+  overlays:
+    - id: S2
+      applies_to: clinical
+      title: Clinical or diagnostic data
+      max_colour: red
+      approver: Data custodian (clinical / diagnostic lab)
+      note: Clinical or diagnostic data - kept under the lab's own retention requirements; never offered for removal, including tool caches.
+
+    - id: S1
+      applies_to: patient
+      title: Patient-derived research data
+      max_colour: amber
+      approver: Data custodian
+      note: 'Patient-derived research data - removal needs the data custodian ({custodian}); check the ethics approval ({ethics_ref}) and retention period (until {retention_until}).'
+
+    - id: S3
+      applies_to: controlled
+      title: Controlled-access external data (EGA, dbGaP, ...)
+      approver: Group leader or designated delegate
+      note: 'Controlled-access data - check the data access agreement (ends {dua_end}): it may REQUIRE deletion when the project ends.'
+      expired_note: 'The data access agreement has ended - deletion may be REQUIRED, not optional.'
+
+    - id: S0
+      applies_to: suspected
+      title: Not declared, but looks like patient or controlled data
+      max_colour: amber
+      approver: Group leader or designated delegate, after the project is declared
+      note: A path in this project looks like patient or controlled-access data, but the project is not in the register - declare it; treated as patient data until then.
+
+default:
+  id: R0
+  colour: red
+  category: protected
+  title: Not covered by any rule
+  why: Unknown files are protected.

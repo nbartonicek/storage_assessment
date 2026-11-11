@@ -1,0 +1,1181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storage report</title>
+<!-- Template for 02_build_storage_report.R, which replaces the data placeholder below.
+     Plain HTML/CSS/JavaScript, no libraries: the built page works offline and as a static file. -->
+<style>
+  /* Colour tokens; dark mode redefines them */
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1d232b; --ink2: #4a5563; --muted: #7a8594;
+    --line: #dde2e8; --accent: #2c6fbb; --grid: #edf0f3; --dim: #c9cfd6;
+    --green: #2e8540; --amber: #b87700; --red: #c0392b; --kept: #e3e7ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181d; --panel: #1d232b; --ink: #e8ecf1; --ink2: #b6c0cc; --muted: #8894a2;
+      --line: #2f3843; --accent: #6aa3e6; --grid: #262e37; --dim: #3a434e;
+      --green: #4caf63; --amber: #e0a133; --red: #e0645a; --kept: #2b333d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { padding: 18px 24px 6px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  h2 { font-size: 17px; margin: 0 0 4px; }
+  h2 .num { display: inline-block; width: 26px; height: 26px; line-height: 26px; text-align: center; border-radius: 50%;
+            background: var(--accent); color: #fff; font-size: 14px; margin-right: 8px; }
+  h3 { font-size: 14px; margin: 14px 0 6px; }
+  h2 .num { cursor: pointer; } h2 .num:hover { filter: brightness(1.15); }
+  .step.collapsed > :not(h2) { display: none; }
+  .subsec { border-top: 1px solid var(--line); padding-top: 4px; margin-top: 6px; }
+  .subsec > h3 { cursor: pointer; user-select: none; }
+  .subsec > h3 .rn { display: inline-block; min-width: 30px; height: 22px; line-height: 22px; text-align: center; border-radius: 11px;
+                     background: var(--kept); color: var(--ink); font-size: 12px; margin-right: 8px; padding: 0 6px; }
+  .subsec > h3::after { content: " ▾"; color: var(--muted); } .subsec.collapsed > h3::after { content: " ▸"; }
+  .subsec.collapsed > .subbody { display: none; }
+  .picker { position: sticky; top: 44px; }
+  table.tree th[data-tk] { cursor: pointer; } table.tree th[data-tk]:hover { color: var(--accent); }
+  .step.collapsed h2 .num { background: var(--muted); }
+  h2 .hint { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+  .lead { color: var(--ink2); margin: 0 0 10px 34px; max-width: 900px; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  main { padding: 10px 24px 40px; max-width: 1320px; }
+  @media (max-width: 700px) { main, header { padding-left: 16px; padding-right: 16px; } .lead { margin-left: 0; } }
+  .step { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+  .cap { color: var(--ink2); font-size: 12.5px; margin-top: 8px; max-width: 1000px; }
+  .note { color: var(--ink2); font-size: 12.5px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+  .card .k { color: var(--muted); font-size: 12px; }
+  .card .v { font-size: 23px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .card .s { color: var(--ink2); font-size: 12px; }
+  .card.green .v { color: var(--green); } .card.amber .v { color: var(--amber); } .card.red .v { color: var(--red); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px;
+         padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  input[type=number], input[type=text], select { font: inherit; font-size: 13px; padding: 3px 6px; color: var(--ink);
+         background: var(--panel); border: 1px solid var(--line); border-radius: 5px; }
+  input[type=number] { width: 72px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--ink2); font-weight: 600; }
+  th.sortable { cursor: pointer; } th.sortable:hover { color: var(--accent); }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .nowrap { white-space: nowrap; }
+  .why { color: var(--muted); font-size: 12px; min-width: 200px; }
+  .changed > td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+  .warn { color: var(--amber); }
+  .tablewrap { overflow-x: auto; }
+  .pill { display: inline-block; padding: 0 7px; border-radius: 9px; color: #fff; font-size: 11px; font-weight: 600; }
+  .pill.green { background: var(--green); } .pill.amber { background: var(--amber); } .pill.red { background: var(--red); }
+  .cbar { display: flex; height: 12px; width: 130px; min-width: 80px; background: var(--kept); border-radius: 3px; overflow: hidden; }
+  .cbar span { height: 100%; } .cbar span + span { border-left: 1px solid var(--panel); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink2); margin: 2px 0 8px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 5px; }
+  /* Project rows that open into their folder tree */
+  .tog { display: inline-block; width: 16px; color: var(--muted); cursor: pointer; user-select: none; }
+  tr.treerow > td { background: var(--bg); padding: 4px 8px 10px 30px; }
+  table.tree { font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  table.tree td.name { white-space: nowrap; max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+  table.tree tr.more td { color: var(--muted); font-style: italic; }
+  /* Figure with project selector on the right */
+  .figgrid { display: grid; grid-template-columns: 1fr 250px; gap: 14px; align-items: start; }
+  @media (max-width: 900px) { .figgrid { grid-template-columns: 1fr; } }
+  .picker { border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  .picker .list { max-height: 360px; overflow-y: auto; margin-top: 6px; }
+  .picker .list label { display: flex; justify-content: space-between; gap: 6px; font-size: 12.5px; padding: 2px 0; cursor: pointer; }
+  .picker .list label span.sz { color: var(--muted); white-space: nowrap; }
+  #tip { position: fixed; pointer-events: none; z-index: 10; background: var(--panel); color: var(--ink);
+         border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; max-width: 420px;
+         box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: none; }
+  #tip .p { font-weight: 600; word-break: break-all; margin-bottom: 4px; }
+  #tip .f { color: var(--ink2); word-break: break-all; }
+  /* Bar charts */
+  .bars { display: grid; grid-template-columns: minmax(110px, 320px) 1fr minmax(80px, auto); gap: 5px 10px; align-items: center; font-size: 12.5px; }
+  .bars .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bars .num { text-align: right; color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .track { display: flex; height: 15px; border-radius: 3px; overflow: hidden; }
+  .track span { height: 100%; } .track span + span { border-left: 2px solid var(--panel); }
+  svg text { fill: var(--muted); font-size: 11px; }
+  .exportbox { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+  .danger { background: var(--red); color: #fff; border-radius: 8px; padding: 12px 16px; margin: 0 0 16px; font-size: 14px; }
+  .danger b { font-weight: 700; }
+  .progress { margin: 0 0 10px; }
+  .pbar { height: 8px; background: var(--kept); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+  .pbar span { display: block; height: 100%; background: var(--accent); }
+  tr.done > td { opacity: 0.6; } tr.done > td.keep { opacity: 1; }
+  input.notein { width: 170px; }
+  .btn.only { padding: 0 6px; font-size: 11.5px; }
+  .mixwarn { border: 2px solid var(--red); border-radius: 8px; padding: 10px 14px; margin: 8px 0; color: var(--ink); }
+  .mixwarn b.t { color: var(--red); }
+  .carttype { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
+  .carttype label { margin-right: 14px; white-space: nowrap; }
+  .focusnote { background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 6px; padding: 6px 10px; margin: 0 0 10px; font-size: 13px; }
+  .track.clickable span { cursor: pointer; } .track.clickable span:hover { filter: brightness(1.15); }
+  #ctx { position: fixed; z-index: 20; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+         box-shadow: 0 6px 18px rgba(0,0,0,0.18); padding: 4px 0; font-size: 13px; display: none; min-width: 220px; }
+  #ctx .h { padding: 4px 12px 6px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); margin-bottom: 2px; word-break: break-all; }
+  #ctx button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 12px; font: inherit; color: var(--ink); cursor: pointer; }
+  #ctx button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--panel);
+           padding: 8px 14px; border-radius: 6px; font-size: 13px; display: none; z-index: 30; }
+  .addbtn { border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 5px; width: 24px; height: 22px;
+            font: inherit; font-weight: 700; cursor: pointer; padding: 0; line-height: 18px; }
+  .addbtn.in { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #scatter svg { cursor: crosshair; user-select: none; }
+  .cartbar { position: sticky; top: 0; z-index: 5; background: var(--accent); color: #fff; padding: 6px 24px; font-size: 13px; display: flex; gap: 12px; align-items: center; }
+  .cartbar a { color: #fff; font-weight: 600; }
+  /* Usage by file owner: shown above the report when there is more than one owner */
+  .people { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 24px; }
+  .people h2 { margin: 0 0 2px; }
+  .people .peoplelist { max-height: 42vh; overflow-y: auto; margin: 8px 0 6px; }
+  .people .bars { grid-template-columns: minmax(130px, 280px) 1fr minmax(80px, auto); }
+  .people .name label { display: flex; gap: 6px; align-items: center; cursor: pointer; overflow: hidden; }
+  .people .name label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .people .off { opacity: 0.35; }
+  .people .track { cursor: pointer; }
+  .ownerbar { background: var(--ink); color: var(--panel); padding: 5px 24px; font-size: 13px; }
+  .ownerbar a { color: var(--panel); font-weight: 600; margin-left: 8px; }
+  .stickytop { position: sticky; top: 0; z-index: 5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Storage report</h1>
+  <div class="sub" id="meta"></div>
+</header>
+<div class="people" id="people" hidden>
+  <h2>Usage by person</h2>
+  <p class="lead" style="margin:0">Tick one or more people to focus the whole report on their files. Nothing ticked = everyone. <button class="btn" id="people-all">Everyone</button></p>
+  <div class="legend" id="legend-people" style="margin-top:8px"></div>
+  <div class="peoplelist"><div class="bars" id="bars-people"></div></div>
+  <div class="cap" id="cap-people"></div>
+</div>
+<div class="stickytop"><div class="cartbar" id="cartbar"></div><div class="ownerbar" id="ownerbar" hidden></div></div>
+<main>
+  <div class="danger" role="alert"><b>Do not copy, move, open, compress or tar these files.</b> Most of them live only in the archive. Reading one brings it back from the archive (a <i>recall</i>); doing that for many files at once causes a <b>recall storm</b> that slows the storage for everyone. <b>Deleting is the only action allowed</b> - it does not recall anything. Moving data will happen centrally during the migration.</div>
+
+  <section class="step">
+    <h2><span class="num">1</span>Overview<span class="hint">click a step's number to hide or show it · "Save progress" (top bar) keeps your work in a file</span></h2>
+    <p class="lead">What you hold, what it costs on disk, and how much the cleanup rules flag. Each file gets a colour: <span class="pill green">green</span> likely removable, <span class="pill amber">amber</span> your judgement, <span class="pill red">red</span> keep. Nothing is removed by this page; removal needs the approval of the project's data custodian.</p>
+    <div class="cards" id="cards"></div>
+    <div class="legend" id="legend-proj" style="margin-top:14px"></div>
+    <div class="bars" id="bars-proj"></div>
+    <div class="cap" id="cap-bars-proj"></div>
+  </section>
+
+  <section class="step">
+    <h2><span class="num">2</span>Set project policy</h2>
+    <p class="lead">You know your projects better than the file dates do. Work down the list, starting with the projects that have the most to clean up (click any column heading to sort by it; click again to reverse). For each project: <b>(a)</b> set its status and whether it holds sensitive (patient, clinical or controlled-access) data, <b>(b)</b> add a note if useful, <b>(c)</b> tick <i>Done</i>, which keeps track of your progress and tells the data custodian which projects you checked. Every colour on the page follows your choices. Untick <i>Show</i> (or press <i>only this</i>) to focus steps 3 and 4 on some projects; all are shown by default.</p>
+    <div class="progress"><div class="row"><b id="prog-text" style="flex:1"></b></div>
+      <div class="pbar"><span id="prog-bar"></span></div></div>
+    <div class="row note" style="margin-bottom:8px">
+      Retention period: not sensitive <input type="number" id="ret-ns" min="0" max="100"> years,
+      sensitive <input type="number" id="ret-s" min="0" max="100"> years
+      <button class="btn" id="proj-reset">Reset to suggestions</button>
+    </div>
+    <div class="tablewrap"><table id="proj-table"></table></div>
+    <div class="cap" id="cap-proj"></div>
+  </section>
+
+  <section class="step">
+    <h2><span class="num">3</span>Data classification</h2>
+    <p class="lead">Five views of your data and how the rules classify it. Pick projects on the right to highlight them. Put what you want deleted into your <b>cart</b> (step 5): <b>drag a lasso</b> around folders in I, <b>right-click</b> a point, a bar or a coloured part of a bar, or use the <b>+</b> buttons. Only files of your <b>cart type</b> (chosen in step 5, shown in the top bar) are added. Click a heading (I-V) to hide or show it.</p>
+    <div class="focusnote" id="focus3" hidden></div>
+    <div class="figgrid">
+      <div>
+        <div class="subsec"><h3><span class="rn">I</span>Directory content</h3><div class="subbody">
+          <div class="row note" style="margin-bottom:4px">Lasso:
+            <label><input type="radio" name="lasso" value="add"> adds to the cart</label>
+            <label><input type="radio" name="lasso" value="remove"> takes out of the cart</label></div>
+          <div id="scatter"></div>
+          <div class="cap" id="cap-scatter"></div>
+        </div></div>
+        <div class="subsec"><h3><span class="rn">II</span>File sizes</h3><div class="subbody">
+          <div class="tablewrap"><table id="top-table"></table></div>
+          <div class="cap" id="cap-top"></div>
+        </div></div>
+        <div class="subsec"><h3><span class="rn">III</span>File numbers</h3><div class="subbody">
+          <div class="bars" id="bars-count"></div>
+          <div class="cap" id="cap-count"></div>
+        </div></div>
+        <div class="subsec"><h3><span class="rn">IV</span>File types</h3><div class="subbody">
+          <div class="legend" id="legend-types"></div>
+          <div class="bars" id="bars-types"></div>
+          <div class="cap" id="cap-types"></div>
+          <div id="type-list"></div>
+        </div></div>
+        <div class="subsec"><h3><span class="rn">V</span>Classification rules</h3><div class="subbody">
+          <div class="tablewrap"><table id="rules-table"></table></div>
+          <div class="cap" id="cap-rules"></div>
+        </div></div>
+      </div>
+      <div class="picker">
+        <div class="row"><b style="flex:1">Projects shown</b><button class="btn" id="sel-all">All</button></div>
+        <div class="list" id="picker"></div>
+        <div class="note" style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px" id="type-hint"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="step">
+    <h2><span class="num">4</span>Folder hierarchy</h2>
+    <p class="lead">Go through your folders, largest first (click a column heading to sort by something else). Click ▸ to look inside, and + to put a folder (with everything below it) in the cart. Only files of your cart type (step 5) are taken.</p>
+    <div class="focusnote" id="focus4" hidden></div>
+    <div class="tablewrap" id="tree-box"></div>
+    <div class="cap" id="cap-tree"></div>
+  </section>
+
+  <section class="step" id="cart-step">
+    <h2><span class="num">5</span>Your cart: estimate and export</h2>
+    <p class="lead">Everything you put in the cart, what deleting it would free, and the list (CSV) to take to the data custodian for approval. The list contains no commands; once approved, the files are deleted by you or IT - never copied or moved.</p>
+    <div class="danger" role="alert"><b>Do not copy, move, open, compress or tar these files.</b> Most of them live only in the archive. Reading one brings it back from the archive (a <i>recall</i>); doing that for many files at once causes a <b>recall storm</b> that slows the storage for everyone. <b>Deleting is the only action allowed</b> - it does not recall anything. Moving data will happen centrally during the migration.</div>
+    <div class="exportbox">
+      <div class="carttype"><b>This cart is for:</b>
+        <label><input type="radio" name="carttype" value="0"> <span class="pill green">green</span> likely removable</label>
+        <label><input type="radio" name="carttype" value="1"> <span class="pill amber">amber</span> your judgement</label>
+        <label><input type="radio" name="carttype" value="2"> <span class="pill red">red</span> keep (needs the custodian's explicit agreement)</label>
+        <div class="note">One type of data per cart: only files of this type can be added. Finish and download one cart, empty it, then switch type for the next.</div></div>
+      <div class="row">
+        <button class="btn" id="cart-quick"></button>
+        <button class="btn" id="cart-clear">Empty the cart</button>
+      </div>
+      <div class="note" id="export-sum" style="margin:8px 0"></div>
+      <div class="mixwarn" id="mix-warn" hidden></div>
+      <div class="cards" id="sim-cards" style="margin:8px 0"></div>
+      <div class="note" id="sim-bar"></div>
+      <h3>What is in the cart, by project</h3>
+      <div class="legend"><span><i style="background:var(--green)"></i>green</span><span><i style="background:var(--amber)"></i>amber</span><span><i style="background:var(--red)"></i>red</span><span><i style="background:var(--kept)"></i>stays</span></div>
+      <div class="bars" id="cart-proj"></div>
+      <div class="cap" id="cap-cart-proj"></div>
+      <div id="cart-list"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="export-btn">Download the cart (CSV)</button>
+        <button class="btn" id="decisions-btn">Download project decisions</button>
+      </div>
+      <div class="note" style="margin-top:6px">Project decisions = every project's status, publication year, sensitivity, note and whether you reviewed it, with its sizes: send it with the list so the data custodian sees your reasoning.</div>
+    </div>
+  </section>
+
+  <section class="step note" id="notes"></section>
+</main>
+<div id="tip"></div>
+<div id="ctx"></div>
+<div id="toast"></div>
+
+<script>
+// Data embedded by 02_build_storage_report.R
+const DATA = /*__DATA__*/null;
+</script>
+<script>
+"use strict";
+// ---------- Set-up: lookups from the embedded data ----------
+const R = DATA.rules, P = DATA.projects, CATS = DATA.categories, ST = DATA.statuses, M = DATA.meta;
+const stById = Object.fromEntries(ST.map(s => [s.id, s]));
+const D = DATA.dirs, ND = D.name.length;
+const ALL_CELLS = DATA.cells, ALL_TYPES = DATA.types;   // cells: [folder, project, rule, files, real, alloc, archived, newest day, owner]; types: [type, project, rule, files, real, owner]
+// File owners. Empty when the scan has one owner or none, and the page then looks as it always did.
+const OWNERS = [].concat(DATA.owners || []), HAS_OWNERS = OWNERS.length > 1;
+const OWN = new Set();                                   // ticked owners; empty = everyone. Starts empty each time the page opens
+let CELLS = ALL_CELLS, TYPES = ALL_TYPES;
+const fileOn = k => OWN.size === 0 || OWN.has(FILES.o[k]);
+// Figure numbers move up by one when "Usage by person" (Figure 1) is on the page
+const FN = n => n + (HAS_OWNERS ? 1 : 0);
+function ownerLabel() {
+  if (!OWN.size) return "everyone";
+  const names = [...OWN].map(o => OWNERS[o]);
+  return names.length <= 3 ? names.join(", ") : `${names.length} of ${OWNERS.length} people`;
+}
+// Every caption says whose files it describes while a selection is active
+function setCap(id, html) {
+  document.getElementById(id).innerHTML = html + (OWN.size ? ` <b>Shown for file owner: ${esc(ownerLabel())}.</b>` : "");
+} //                  // rows: [folder, project, rule, files, real, alloc, archived, newest day]
+const FILES = M.has_files ? DATA.files : null;
+const TODAY = new Date();
+const STORE = "storage-report-v2:" + M.scan_root;
+const COLS = ["green", "amber", "red"];
+const COLVAR = ["var(--green)", "var(--amber)", "var(--red)"];
+
+// Human-readable binary sizes, percentages, HTML escaping
+function hs(b) {
+  const u = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i === 0 ? b.toFixed(0) : b.toFixed(b < 10 ? 2 : 1)) + " " + u[i];
+}
+// one decimal near 0 % and 100 %, so 99.9 % never shows as 100 %
+const pct = x => (x > 0.99 && x < 1 ? (Math.floor(1000 * x) / 10).toFixed(1) : (100 * x).toFixed(x > 0 && x < 0.1 ? 1 : 0)) + " %";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const fmtN = n => Math.round(n).toLocaleString("en-AU");
+const dayStr = d => new Date(d * 864e5).toISOString().slice(0, 10);
+const arr = x => x == null ? [] : [].concat(x);          // length-1 arrays arrive as scalars
+
+// Folder paths below the scanned folder ("" = the scanned folder), children, depth
+const PATH = new Array(ND);
+for (let i = 0; i < ND; i++) PATH[i] = D.parent[i] < 0 ? "" : (PATH[D.parent[i]] ? PATH[D.parent[i]] + "/" : "") + D.name[i];
+const KIDS = Array.from({length: ND}, () => []);
+for (let i = 1; i < ND; i++) KIDS[D.parent[i]].push(i);
+const DIR_OF_PATH = new Map(PATH.map((p, i) => [p, i]));
+// Each project's own folder (its root in the tree); "(top level)" maps to the scanned folder
+const PROJ_DIR = P.map(p => p.name === "(top level)" ? 0 : (DIR_OF_PATH.has(p.name) ? DIR_OF_PATH.get(p.name) : -1));
+// Short label: first folder / … / last folder
+// Short label: first folder / … / last two folders; very long names are cut
+const cut = x => x.length > 22 ? x.slice(0, 20) + "…" : x;
+const short = p => { const s = p.split("/").map(cut); return s.length <= 3 ? s.join("/") : `${s[0]}/…/${s[s.length - 2]}/${s[s.length - 1]}`; };
+
+// ---------- State: per-project choices and selection (remembered in this browser if possible) ----------
+function defaults() {
+  return {status: P.map(p => p.status), pubYear: P.map(() => ""), sensitive: P.map(p => p.sensitive),
+          retNs: DATA.retention.nonsensitive_years, retS: DATA.retention.sensitive_years,
+          open: [], sel: [], exportCols: [true, false, false],
+          reviewed: P.map(() => false), notes: P.map(() => ""), projSort: {k: "go", dir: -1},
+          cart: [], cartType: 0, treeSort: {k: "real", dir: -1}, lassoMode: "add", subCollapsed: []};
+}
+let S = defaults();
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE) || "null");
+  if (saved && saved.status && saved.status.length === P.length) S = Object.assign(S, saved);
+} catch (e) { /* storage blocked: start from suggestions */ }
+if (!S.reviewed || S.reviewed.length !== P.length) { S.reviewed = P.map(() => false); S.notes = P.map(() => ""); }
+function persist() { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) {} }
+const OPEN = new Set(S.open);
+const SEL = new Set(S.sel);
+const selected = p => SEL.size === 0 || SEL.has(p);          // nothing picked = everything
+const CART = new Set(FILES ? (S.cart || []).filter(k => k < FILES.d.length) : []);
+
+// ---------- Colour model: rule colour, then the project's status and sensitivity ----------
+// Years since the project's retention clock started; null = clock not started (active)
+function clockYears(p) {
+  const st = stById[S.status[p]];
+  if (st.clock === "none") return null;
+  let start = new Date(P[p].last_change);
+  if (st.clock === "publication" && S.pubYear[p]) start = new Date(+S.pubYear[p], 6, 1);
+  return (TODAY - start) / (365.25 * 864e5);
+}
+// Effective colour (0 green, 1 amber, 2 red) and whether status/retention held it back,
+// for every project x rule, rebuilt when a project setting changes
+let EFF;
+function computeEff() {
+  EFF = P.map((_, p) => R.map(r => {
+    const base = COLS.indexOf(r.colour), cat = r.category;
+    if (base < 2 && stById[S.status[p]].locked.includes(cat)) {
+      const y = clockYears(p), limit = S.sensitive[p] ? S.retS : S.retNs;
+      if (y === null || y < limit) return [cat === "raw" ? 2 : 1, true];
+    }
+    // Sensitive data is one step more cautious: green becomes amber (data custodian decides)
+    if (S.sensitive[p] && base === 0) return [1, false];
+    return [base, false];
+  }));
+}
+
+// ---------- Aggregation: per folder direct and recursive totals, per colour ----------
+const DIR = {files: new Float64Array(ND), real: new Float64Array(ND), alloc: new Float64Array(ND), arch: new Float64Array(ND),
+             mday: new Float64Array(ND), dfiles: new Float64Array(ND), dreal: new Float64Array(ND)};
+const TOT = {real: 0, alloc: 0, arch: 0, files: 0};
+// Per project: on-disk and archived size. p.real and p.files follow the owner selection;
+// p.real0 and p.files0 keep the whole project.
+const PROJ = P.map(() => ({alloc: 0, arch: 0}));
+P.forEach(p => { p.real0 = p.real; p.files0 = p.files; });
+// Add up the folders and projects for the owners currently selected
+function computeTotals() {
+  Object.values(DIR).forEach(a => a.fill(0));
+  PROJ.forEach(x => { x.alloc = 0; x.arch = 0; });
+  P.forEach(p => { p.real = 0; p.files = 0; });
+  for (const [d, p, , files, real, alloc, arch, mday] of CELLS) {
+    DIR.files[d] += files; DIR.real[d] += real; DIR.alloc[d] += alloc; DIR.arch[d] += arch;
+    DIR.mday[d] = Math.max(DIR.mday[d], mday); DIR.dfiles[d] += files; DIR.dreal[d] += real;
+    PROJ[p].alloc += alloc; PROJ[p].arch += arch; P[p].real += real; P[p].files += files;
+  }
+  // Folders are listed parents first, so walking backwards adds every child into its parent
+  for (let i = ND - 1; i > 0; i--) {
+    const p = D.parent[i];
+    DIR.files[p] += DIR.files[i]; DIR.real[p] += DIR.real[i]; DIR.alloc[p] += DIR.alloc[i];
+    DIR.arch[p] += DIR.arch[i]; DIR.mday[p] = Math.max(DIR.mday[p], DIR.mday[i]);
+  }
+  Object.assign(TOT, {real: DIR.real[0], alloc: DIR.alloc[0], arch: DIR.arch[0], files: DIR.files[0]});
+}
+computeTotals();
+const GRAND = Object.assign({}, TOT);                    // totals for everyone, whatever is selected
+// Projects and folders that hold files of the selected owners
+const hasData = i => P[i].files > 0;
+const nProj = () => P.reduce((a, _, i) => a + (hasData(i) ? 1 : 0), 0);
+const nDirs = () => DIR.files.reduce((a, x) => a + (x > 0 ? 1 : 0), 0);
+let COL, DCOL, PCOL, HELD;
+function computeColours() {
+  computeEff();
+  COL = [new Float64Array(ND), new Float64Array(ND), new Float64Array(ND)];   // recursive, by folder
+  DCOL = [new Float64Array(ND), new Float64Array(ND), new Float64Array(ND)];  // direct, by folder
+  PCOL = P.map(() => [0, 0, 0]); HELD = 0;
+  for (const [d, p, r, , real] of CELLS) {
+    const [c, held] = EFF[p][r];
+    DCOL[c][d] += real; COL[c][d] += real; PCOL[p][c] += real; if (held) HELD += real;
+  }
+  for (let i = ND - 1; i > 0; i--) for (let c = 0; c < 3; c++) COL[c][D.parent[i]] += COL[c][i];
+}
+// Colour segments; only segments that hold data are drawn, so an empty one leaves no
+// white separator. data-c lets a click find the colour.
+const segs = (v, t) => v.map((x, c) => x > 0 ? `<span data-c="${c}" style="width:${100 * x / t}%;background:${COLVAR[c]}"></span>` : "").join("");
+const cbar = (g, a, r) => { const t = Math.max(g + a + r, 1);
+  return `<div class="cbar" title="green ${hs(g)} · amber ${hs(a)} · red ${hs(r)}">${segs([g, a, r], t)}</div>`; };
+const legendHtml = `<span><i style="background:var(--green)"></i>green: likely removable</span><span><i style="background:var(--amber)"></i>amber: your judgement</span><span><i style="background:var(--red)"></i>red: keep</span>`;
+
+// ---------- Step 1: headline cards ----------
+function renderCards() {
+  const g = COL[0][0], a = COL[1][0], r = COL[2][0];
+  document.getElementById("cards").innerHTML = [
+    ["", "Real size", hs(TOT.real), `${fmtN(TOT.files)} files in ${nProj()} projects`],
+    ["", "On disk now", hs(TOT.alloc), "what du and quotas show"],
+    ["", "Archived", pct(TOT.arch / TOT.real), `${hs(TOT.arch)} held in the archive`],
+    ["green", "Green", hs(g), pct(g / TOT.real) + " of the real size"],
+    ["amber", "Amber", hs(a), pct(a / TOT.real) + " of the real size"],
+    ["red", "Red", hs(r), `${pct(r / TOT.real)}; ${hs(HELD)} of it held by project status`]
+  ].map(c => `<div class="card ${c[0]}"><div class="k">${c[1]}</div><div class="v">${c[2]}</div><div class="s">${c[3]}</div></div>`).join("");
+}
+
+// Figure 1: one bar per project, length = real size, split by colour after the project settings
+const FIG1_MAX = 25;
+function renderProjectBars() {
+  const order = P.map((_, i) => i).filter(hasData).sort((a, b) => P[b].real - P[a].real), top = order.slice(0, FIG1_MAX);
+  const max = Math.max(P[top[0]].real, 1), rest = order.slice(FIG1_MAX).reduce((a, i) => a + P[i].real, 0);
+  document.getElementById("legend-proj").innerHTML = legendHtml;
+  document.getElementById("bars-proj").innerHTML = top.map(i =>
+    `<div class="name" title="${esc(P[i].name)}">${esc(P[i].name)}</div><div class="track" data-pb="${i}" style="width:${100 * P[i].real / max}%;min-width:2px">${segs(PCOL[i], Math.max(P[i].real, 1))}</div><div class="num">${hs(P[i].real)} · ${fmtN(P[i].files)} files</div>`).join("");
+  setCap("cap-bars-proj", `<b>Figure ${FN(1)}.</b> How much of each project the rules mark green (likely removable), amber (your judgement) or red (keep). One bar per project (folders ${M.project_level > 1 ? M.project_level + " levels" : "directly"} below ${esc(M.scan_root)}); bar length = real (logical) size, split by colour after your project settings; label = real size and number of files. The ${top.length} largest of ${nProj()} projects${rest > 0 ? `; the others hold ${hs(rest)}` : ""}. Rules version ${esc(M.rules_version)}. Source: ${esc(M.scans.join(", "))}.`);
+}
+// Hover a project bar: real size per colour
+document.getElementById("bars-proj").addEventListener("mousemove", e => {
+  const el = e.target.closest("[data-pb]"); if (!el) { tip.style.display = "none"; return; }
+  const i = +el.dataset.pb;
+  tip.innerHTML = `<div class="p">${esc(P[i].name)}</div><div>${hs(P[i].real)} real size, ${fmtN(P[i].files)} files</div>` +
+    [0, 1, 2].map(c => PCOL[i][c] > 0 ? `<div><span class="pill ${COLS[c]}">${COLS[c]}</span> ${hs(PCOL[i][c])} (${pct(PCOL[i][c] / Math.max(P[i].real, 1))})</div>` : "").join("");
+  tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + "px";
+});
+document.getElementById("bars-proj").addEventListener("mouseleave", () => { tip.style.display = "none"; });
+
+// ---------- Step 2: project policy ----------
+// Folder tree (step 4) under one folder: its largest subfolders (topN) and the 30
+// largest of every folder opened further with ▸
+function treeRows(root, depth0, topN) {
+  const rows = [];
+  const order = list => list.slice().sort(treeCmp);
+  const walk = (i, depth) => {
+    const kids = KIDS[i].filter(k => DIR.files[k] > 0), isOpen = OPEN.has(i), pad = 14 * depth;
+    rows.push(`<tr data-td="${i}"><td>${FILES ? `<button class="addbtn" data-addtd="${i}" title="Add this folder and everything below it to the cart (files of the cart type only)">+</button>` : ""}</td><td class="name" style="padding-left:${8 + pad}px" title="${esc(PATH[i])}"><span class="tog" data-d="${i}">${kids.length ? (isOpen ? "▾" : "▸") : ""}</span>${esc(D.name[i])}${kids.length ? "/" : ""}</td>
+      <td class="n">${hs(DIR.real[i])}</td><td class="n">${hs(DIR.alloc[i])}</td><td class="n">${pct(DIR.arch[i] / Math.max(DIR.real[i], 1))}</td>
+      <td>${cbar(COL[0][i], COL[1][i], COL[2][i])}</td><td class="n">${fmtN(DIR.files[i])}</td><td class="nowrap">${dayStr(DIR.mday[i])}</td></tr>`);
+    if (!isOpen) return;
+    const sorted = order(kids);
+    const shown = sorted.filter((k, j) => j < 30 && (S.treeSort.k !== "real" || DIR.real[k] >= 1e-4 * DIR.real[i]));
+    shown.forEach(k => walk(k, depth + 1));
+    const rest = sorted.length - shown.length;
+    if (rest > 0) rows.push(`<tr class="more"><td></td><td style="padding-left:${30 + pad}px">${rest} smaller folder(s)</td><td class="n">${hs(sorted.slice(shown.length).reduce((a, k) => a + DIR.real[k], 0))}</td><td colspan="5"></td></tr>`);
+  };
+  // The project folder itself is the header; its children are listed
+  const sorted = order(KIDS[root].filter(k => DIR.files[k] > 0 && (D.p[k] < 0 || selected(D.p[k]))));
+  const shown = sorted.filter((k, j) => j < topN);
+  shown.forEach(k => walk(k, depth0));
+  const rest = sorted.length - shown.length;
+  if (rest > 0) rows.push(`<tr class="more"><td></td><td style="padding-left:30px">${rest} smaller folder(s)</td><td class="n">${hs(sorted.slice(shown.length).reduce((a, k) => a + DIR.real[k], 0))}</td><td colspan="5"></td></tr>`);
+  const th = (k, lab, n) => `<th data-tk="${k}" class="${n ? "n" : ""}">${lab}${S.treeSort.k === k ? (S.treeSort.dir < 0 ? " ▾" : " ▴") : ""}</th>`;
+  return `<table class="tree"><tr><th></th>${th("name", "Folder")}${th("real", "Real size", 1)}${th("alloc", "On disk", 1)}${th("arch", "Archived", 1)}${th("could", "Colours")}${th("files", "Files", 1)}${th("mday", "Last change")}</tr>${rows.join("")}</table>`;
+}
+// Sort order of the folder hierarchy (step 4); "Colours" sorts by what could go (green + amber)
+const TREE_SORT_LABEL = {name: "name", real: "real size", alloc: "size on disk", arch: "archived share", could: "what could go (green + amber)", files: "number of files", mday: "last change"};
+const TREE_KEY = {name: i => D.name[i].toLowerCase(), real: i => DIR.real[i], alloc: i => DIR.alloc[i],
+                  arch: i => DIR.arch[i] / Math.max(DIR.real[i], 1), could: i => COL[0][i] + COL[1][i], files: i => DIR.files[i], mday: i => DIR.mday[i]};
+function treeCmp(a, b) {
+  const f = TREE_KEY[S.treeSort.k], x = f(a), y = f(b);
+  return S.treeSort.dir * (x < y ? -1 : x > y ? 1 : 0);
+}
+function renderFolderTree() {
+  document.getElementById("tree-box").innerHTML = treeRows(0, 0, Infinity);
+  setCap("cap-tree", `<b>Table 4.</b> Your folders below ${esc(M.scan_root)}, sorted by ${TREE_SORT_LABEL[S.treeSort.k]} (click a column heading to change; within each folder its subfolders follow the same order). Real size and files include all subfolders; On disk = what they occupy now; Archived = share of the real size held only in the archive; Colours = real size split by colour after your project policy (step 2). ▸ opens a folder (30 largest subfolders per level; hover for the full path). + (or right-click) puts the folder and everything below it in the cart (files of the cart type only). ${fmtN(TOT.files)} files in ${fmtN(nDirs())} folders.`);
+}
+// Order of the project rows: by whichever column heading was clicked last (S.projSort).
+// Each column has a sort value; empty text and missing years always go last.
+const PROJ_COLS = [
+  ["show", "Show", 0, "Show this project in steps 3 and 4"], ["done", "Done", 0, "Tick when you have set this project's policy"],
+  ["name", "Project", 0], ["real", "Real size", 1], ["go", "Could go", 1, "Green + amber: what the rules suggest could go"],
+  ["alloc", "On disk", 1], ["arch", "Archived", 1], ["last", "Last change", 0], ["status", "Status", 0],
+  ["pub", "Published in", 0], ["sens", "Sensitivity", 0], ["colours", "Colours", 0, "Sorts by the share that could go (green + amber)"],
+  ["note", "Note", 0], ["why", "Suggested because", 0]];
+// First click on a column: text and dates ascending, numbers and ticks descending
+const PROJ_ASC = new Set(["name", "last", "status", "note", "why"]);
+function projSortValue(k, i) {
+  const p = P[i];
+  switch (k) {
+    case "show": return selected(i) ? 1 : 0;
+    case "done": return S.reviewed[i] ? 1 : 0;
+    case "name": return p.name.toLowerCase();
+    case "real": return p.real;
+    case "go": return PCOL[i][0] + PCOL[i][1];
+    case "alloc": return PROJ[i].alloc;
+    case "arch": return PROJ[i].arch / Math.max(p.real, 1);
+    case "last": return p.last_change;
+    case "status": return ST.findIndex(s => s.id === S.status[i]);
+    case "pub": return S.pubYear[i] ? +S.pubYear[i] : null;
+    case "sens": return S.sensitive[i] ? 1 : 0;
+    case "colours": return (PCOL[i][0] + PCOL[i][1]) / Math.max(p.real, 1);
+    case "note": return S.notes[i] ? S.notes[i].toLowerCase() : null;
+    case "why": return p.sensitive_why.toLowerCase();
+  }
+}
+function projOrder() {
+  const {k, dir} = S.projSort && PROJ_COLS.some(c => c[0] === S.projSort.k) ? S.projSort : {k: "go", dir: -1};
+  return P.map((_, i) => i).filter(hasData).sort((a, b) => {
+    const x = projSortValue(k, a), y = projSortValue(k, b);
+    if (x === null || y === null) return (x === null) - (y === null) || a - b;
+    const c = typeof x === "string" ? x.localeCompare(y) : x - y;
+    return c ? dir * c : P[b].real - P[a].real;
+  });
+}
+function renderProgress() {
+  const n = S.reviewed.filter((x, i) => x && hasData(i)).length, done = P.reduce((a, p, i) => a + (S.reviewed[i] ? p.real : 0), 0);
+  document.getElementById("prog-text").textContent = `Done: ${n} of ${nProj()} projects (${hs(done)} of ${hs(TOT.real)})`;
+  document.getElementById("prog-bar").style.width = (100 * done / TOT.real) + "%";
+}
+function renderProjects() {
+  const thisYear = TODAY.getFullYear();
+  renderProgress();
+  const ps = S.projSort || {};
+  document.getElementById("proj-table").innerHTML =
+    `<tr>${PROJ_COLS.map(([k, lab, n, tip]) => `<th class="sortable ${n ? "n" : ""}" data-pk="${k}"${tip ? ` title="${esc(tip)}"` : ""}>${lab}${ps.k === k ? (ps.dir < 0 ? " ▾" : " ▴") : ""}${k === "show" && SEL.size ? ` <a href="#" data-showall>(all)</a>` : ""}</th>`).join("")}</tr>` +
+    projOrder().map(i => { const p = P[i];
+      const changed = S.status[i] !== p.status || S.sensitive[i] !== p.sensitive || S.pubYear[i];
+      const pub = S.status[i] === "inactive_published", pd = PROJ_DIR[i];
+      const main = `<tr class="${changed ? "changed" : ""} ${S.reviewed[i] ? "done" : ""}">
+        <td class="keep nowrap"><input type="checkbox" data-i="${i}" data-k="show" ${selected(i) ? "checked" : ""} aria-label="Show ${esc(p.name)}"> <button class="btn only" data-only="${i}" title="Show only this project in steps 3 and 4">only this</button></td>
+        <td class="keep" style="text-align:center"><input type="checkbox" data-i="${i}" data-k="rev" ${S.reviewed[i] ? "checked" : ""} aria-label="${esc(p.name)} done"></td>
+        <td><b>${esc(p.name)}</b></td><td class="n">${hs(p.real)}</td><td class="n">${hs(PCOL[i][0] + PCOL[i][1])}</td><td class="n">${hs(PROJ[i].alloc)}</td><td class="n">${pct(PROJ[i].arch / Math.max(p.real, 1))}</td>
+        <td class="nowrap">${p.last_change}</td>
+        <td><select data-i="${i}" data-k="status" aria-label="Status of ${esc(p.name)}">${ST.map(s => `<option value="${s.id}" ${S.status[i] === s.id ? "selected" : ""}>${esc(s.label)}</option>`).join("")}</select></td>
+        <td class="nowrap"><input type="number" data-i="${i}" data-k="pub" min="1990" max="${thisYear}" placeholder="year" value="${S.pubYear[i]}" ${pub ? "" : "disabled"} aria-label="Publication year of ${esc(p.name)}">${pub && !S.pubYear[i] ? ' <span class="warn" title="Without a year the last change is used">⚠</span>' : ""}</td>
+        <td><select data-i="${i}" data-k="sens" aria-label="Sensitivity of ${esc(p.name)}"><option value="0" ${S.sensitive[i] ? "" : "selected"}>Not sensitive</option><option value="1" ${S.sensitive[i] ? "selected" : ""}>Sensitive</option></select></td>
+        <td>${cbar(...PCOL[i])}</td>
+        <td class="keep"><input type="text" class="notein" data-i="${i}" data-k="note" placeholder="e.g. paper in review" value="${esc(S.notes[i])}" aria-label="Note for ${esc(p.name)}"></td>
+        <td class="why">${p.status === "active" ? "changed within " + M.active_months + " months; " : "no change for " + M.active_months + "+ months; "}${esc(p.sensitive_why)}</td></tr>`;
+      return main;
+    }).join("");
+  const st = ST.map(s => `<b>${esc(s.label)}</b>: ${s.locked.map(c => esc(CATS.find(x => x.id === c).label.toLowerCase())).join(" and ")} are held (raw data red, other data amber) ${s.clock === "none" ? "while the work is active" : s.clock === "publication" ? "until the retention period after publication has passed" : "until the retention period after the last change has passed"}`).join("; ");
+  setCap("cap-proj", `<b>Table 1.</b> Your ${nProj()} projects (folders ${M.project_level > 1 ? M.project_level + " levels" : "directly"} below ${esc(M.scan_root)}). Real size = logical size of all files; On disk = what they occupy now (what quotas count); Archived = share of the real size held only in the archive (files ≥ 64 KiB with < 10 % on disk), which looks normal in a folder listing but hardly counts in quotas. Status and sensitivity are suggestions from the newest file date and from patient-like words or accession IDs in paths; change them and every colour follows. ${st}. Sensitive projects use the longer retention period, and their green files become amber. Could go = green + amber, what the rules suggest could be removed. Choices, notes and ticks are kept in this browser only - save them with "Save progress" at the top, or download them in step 5.`);
+}
+document.getElementById("proj-table").addEventListener("change", e => {
+  const i = +e.target.dataset.i, k = e.target.dataset.k; if (!k) return;
+  if (k === "status") S.status[i] = e.target.value;
+  if (k === "pub") S.pubYear[i] = e.target.value;
+  if (k === "sens") S.sensitive[i] = e.target.value === "1";
+  if (k === "note") { S.notes[i] = e.target.value; persist(); return; }
+  if (k === "rev") { S.reviewed[i] = e.target.checked; persist(); renderProjects(); return; }
+  if (k === "show") { setShown(i, e.target.checked); return; }
+  refresh();
+});
+document.getElementById("proj-table").addEventListener("click", e => {
+  const b = e.target.closest("button[data-only]"); if (b) { focusOn(+b.dataset.only); return; }
+  // A click on a column heading sorts by it; a second click on the same heading reverses
+  const th = e.target.closest("th[data-pk]");
+  if (th && !e.target.closest("[data-showall]")) {
+    const k = th.dataset.pk, cur = S.projSort || {};
+    S.projSort = {k, dir: cur.k === k ? -cur.dir : (PROJ_ASC.has(k) ? 1 : -1)};
+    persist(); renderProjects();
+  }
+});
+// Step 4: ▸ opens a folder; + puts the folder and everything below it in the cart
+document.getElementById("tree-box").addEventListener("click", e => {
+  const th = e.target.closest("th[data-tk]");
+  if (th) { const k = th.dataset.tk; S.treeSort = {k, dir: S.treeSort.k === k ? -S.treeSort.dir : (k === "name" ? 1 : -1)}; persist(); renderFolderTree(); return; }
+  const ab = e.target.closest("button[data-addtd]");
+  if (ab) { const d = +ab.dataset.addtd; addToCart(byAddCols(filesInDirs(subtree(d))), PATH[d]); return; }
+  const t = e.target.closest(".tog"); if (!t || !t.textContent) return;
+  const key = +t.dataset.d;
+  OPEN.has(key) ? OPEN.delete(key) : OPEN.add(key);
+  S.open = [...OPEN]; persist(); renderFolderTree();
+});
+const retNs = document.getElementById("ret-ns"), retS = document.getElementById("ret-s");
+retNs.onchange = () => { S.retNs = Math.max(0, +retNs.value || 0); refresh(); };
+retS.onchange = () => { S.retS = Math.max(0, +retS.value || 0); refresh(); };
+document.getElementById("proj-reset").onclick = () => {
+  const d = defaults(); S.status = d.status; S.pubYear = d.pubYear; S.sensitive = d.sensitive;
+  S.retNs = d.retNs; S.retS = d.retS; retNs.value = S.retNs; retS.value = S.retS; refresh();
+};
+
+// ---------- The cart: file indexes, how to find files for a folder/type/rule, add/remove ----------
+// Files directly in each folder, for the selected owners
+const BY_DIR = Array.from({length: ND}, () => []);
+function rebuildByDir() {
+  BY_DIR.forEach(x => { x.length = 0; });
+  if (FILES) for (let k = 0; k < FILES.d.length; k++) if (fileOn(k)) BY_DIR[FILES.d[k]].push(k);
+}
+rebuildByDir();
+const fileColour = k => EFF[FILES.p[k]][FILES.r[k]][0];
+// All folders under (and including) folder d
+function subtree(d) { const out = [d]; for (let j = 0; j < out.length; j++) out.push(...KIDS[out[j]]); return out; }
+const filesInDirs = ds => ds.flatMap(d => BY_DIR[d]);
+const filesWhere = test => { const out = []; for (let k = 0; k < FILES.d.length; k++) if (fileOn(k) && test(k)) out.push(k); return out; };
+// Every add goes through addToCart, which keeps only files of the cart type; the
+// group helpers below therefore pass everything through
+const byAddCols = ks => ks;
+const toastEl = document.getElementById("toast");
+let toastTimer;
+function toast(msg) { toastEl.textContent = msg; toastEl.style.display = "block"; clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.style.display = "none", 2600); }
+function cartChanged() { S.cart = [...CART]; persist(); renderCart(); renderScatter(); renderTop(); renderCounts(); renderTypeList(); }
+// Only files of the cart type go in, so one list never mixes types of data
+function addToCart(ks, what) {
+  const t = S.cartType, skipped = [0, 0, 0];
+  let n = 0, b = 0;
+  for (const k of ks) {
+    const c = fileColour(k);
+    if (c !== t) { skipped[c]++; continue; }
+    if (!CART.has(k)) { CART.add(k); n++; b += FILES.size[k]; }
+  }
+  const skip = skipped.map((x, c) => x ? `${fmtN(x)} ${COLS[c]}` : "").filter(Boolean).join(", ");
+  toast((n ? `Added ${fmtN(n)} ${COLS[t]} file(s), ${hs(b)}${what ? " (" + what + ")" : ""}` : `Nothing added`) +
+        (skip ? ` - left out ${skip} file(s): your cart is for ${COLS[t]} files` : n ? "" : " (already in the cart)"));
+  cartChanged();
+}
+function removeFromCart(ks, what) {
+  let n = 0; for (const k of ks) if (CART.delete(k)) n++;
+  toast(`Removed ${fmtN(n)} file(s)${what ? " (" + what + ")" : ""} from the cart`); cartChanged();
+}
+// Right-click menu: what the clicked thing stands for, then add or remove it
+const ctx = document.getElementById("ctx");
+function ctxTarget(el) {
+  const pt = el.closest("circle[data-i]"), cnt = el.closest("[data-cd]"), seg = el.closest(".track[data-e] span[data-c]"),
+        tree = el.closest("[data-td]"), rule = el.closest("[data-rule]");
+  if (pt) { const d = +pt.dataset.i; return {label: (PATH[d] || "(scanned folder)") + " - files directly in this folder", ks: () => byAddCols(BY_DIR[d])}; }
+  if (cnt) { const d = +cnt.dataset.cd; return {label: (PATH[d] || "(scanned folder)") + " - files directly in this folder", ks: () => byAddCols(BY_DIR[d])}; }
+  if (tree) { const d = +tree.dataset.td; return {label: (PATH[d] || "(scanned folder)") + " and everything below it", ks: () => byAddCols(filesInDirs(subtree(d)))}; }
+  if (seg) { const e = +seg.closest(".track").dataset.e, c = +seg.dataset.c;
+    return {label: `${COLS[c]} ${DATA.ext_names[e]} files${SEL.size ? " in the selected projects" : ""}`, ks: () => filesWhere(k => FILES.e[k] === e && selected(FILES.p[k]) && fileColour(k) === c)}; }
+  if (rule) { const r = +rule.dataset.rule;
+    return {label: `files decided by rule ${R[r].id}${SEL.size ? " in the selected projects" : ""}`, ks: () => byAddCols(filesWhere(k => FILES.r[k] === r && selected(FILES.p[k])))}; }
+  return null;
+}
+document.addEventListener("contextmenu", e => {
+  if (!FILES) return;
+  const t = ctxTarget(e.target); if (!t) return;
+  e.preventDefault(); tip.style.display = "none";
+  ctx.innerHTML = `<div class="h">${esc(t.label)}</div><button data-a="add">Add to cart</button><button data-a="rm">Remove from cart</button>`;
+  ctx.style.display = "block";
+  ctx.style.left = Math.min(e.clientX, window.innerWidth - ctx.offsetWidth - 8) + "px";
+  ctx.style.top = Math.min(e.clientY, window.innerHeight - ctx.offsetHeight - 8) + "px";
+  ctx.onclick = ev => { const a = ev.target.dataset.a; if (!a) return; ctx.style.display = "none";
+    a === "add" ? addToCart(t.ks(), "") : removeFromCart(t.ks(), ""); };
+});
+document.addEventListener("click", e => { if (!ctx.contains(e.target)) ctx.style.display = "none"; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") ctx.style.display = "none"; });
+// Cart type: one type of data per cart (step 5)
+document.querySelectorAll("input[name=carttype]").forEach(b => {
+  b.checked = +b.value === S.cartType;
+  b.onchange = () => { S.cartType = +b.value; persist(); renderCart(); };
+});
+
+// ---------- Which projects are shown: one setting for steps 2 to 4 ----------
+// SEL empty = all projects shown (the default); otherwise only the projects in SEL.
+// Set from the "Show" column in step 2 or the project list in step 3.
+function setShown(p, on) {
+  if (SEL.size === 0) P.forEach((_, i) => { if (hasData(i)) SEL.add(i); });       // from "all" to an explicit list
+  on ? SEL.add(p) : SEL.delete(p);
+  if (SEL.size === nProj()) SEL.clear();                      // everything ticked = all
+  else if (SEL.size === 0) { toast("At least one project stays shown"); SEL.add(p); }
+  selChanged();
+}
+function focusOn(p) { SEL.clear(); SEL.add(p); if (P.length === 1) SEL.clear(); selChanged(); }
+function showAll() { SEL.clear(); selChanged(); }
+function focusLabel() {
+  if (SEL.size === 0) return "";
+  return SEL.size === 1 ? P[[...SEL][0]].name : `${SEL.size} of ${nProj()} projects`;
+}
+function renderPicker() {
+  document.getElementById("picker").innerHTML = P.map((p, i) =>
+    !hasData(i) ? "" : `<label><span><input type="checkbox" data-p="${i}" ${selected(i) ? "checked" : ""}> ${esc(p.name)}</span><span class="sz">${hs(p.real)}</span></label>`).join("");
+}
+function selChanged() {
+  S.sel = [...SEL]; persist();
+  renderPicker(); renderProjects(); renderScatter(); renderTop(); renderCounts(); renderTypes(); renderRules(); renderFolderTree(); renderCart();
+}
+document.getElementById("picker").addEventListener("change", e => setShown(+e.target.dataset.p, e.target.checked));
+document.getElementById("sel-all").onclick = showAll;
+document.addEventListener("click", e => { if (e.target.closest("[data-showall]")) { e.preventDefault(); showAll(); } });
+
+// Scatter (SVG, log-log): one point per folder that directly holds files
+const tip = document.getElementById("tip");
+function renderScatter() {
+  const W = 820, H = 440, L = 62, B = 40, T = 12, Rm = 16;
+  const pts = [];
+  for (let i = 0; i < ND; i++) if (DIR.dfiles[i] > 0 && selected(D.p[i])) {
+    const c = [DCOL[0][i], DCOL[1][i], DCOL[2][i]];
+    pts.push([DIR.dfiles[i], Math.max(DIR.dreal[i], 1), c.indexOf(Math.max(...c)), i]);
+  }
+  if (!pts.length) pts.push([1, 1, 2, 0]);
+  const xmax = Math.max(...pts.map(p => p[0])) * 2, ymax = Math.max(...pts.map(p => p[1])) * 4;
+  const lx = Math.log10, X = v => L + (W - L - Rm) * lx(v) / lx(xmax), Y = v => H - B - (H - B - T) * lx(v) / lx(ymax);
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px" role="img" aria-label="Files per folder against their size">`;
+  // Grid and axes: powers of ten on x, powers of 1024 on y
+  for (let e = 0; Math.pow(10, e) <= xmax; e++) { const x = X(Math.pow(10, e)); s += `<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="var(--grid)"/><text x="${x}" y="${H - B + 15}" text-anchor="middle">${fmtN(Math.pow(10, e))}</text>`; }
+  for (let e = 0; Math.pow(1024, e) <= ymax; e++) { const y = Y(Math.pow(1024, e)); s += `<line x1="${L}" x2="${W - Rm}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${hs(Math.pow(1024, e)).replace(".00", "")}</text>`; }
+  // Constant mean file size guides: 1 KiB, 1 MiB, 1 GiB per file
+  [[1024, "1 KiB/file"], [1024 ** 2, "1 MiB/file"], [1024 ** 3, "1 GiB/file"]].forEach(([per, lab]) => {
+    const x2 = Math.min(xmax, ymax / per); if (x2 <= 1) return;
+    s += `<line x1="${X(1)}" y1="${Y(per)}" x2="${X(x2)}" y2="${Y(x2 * per)}" stroke="var(--muted)" stroke-dasharray="3 3" opacity="0.6"/><text x="${X(x2) - 4}" y="${Y(x2 * per) - 5}" text-anchor="end">${lab}</text>`;
+  });
+  // Folders of the shown projects by colour, red first so green and amber are on top
+  SCAT = pts.map(([x, y, , i]) => [X(x), Y(y), i]);
+  const inCart = new Set(); if (FILES) for (const k of CART) inCart.add(FILES.d[k]);
+  for (const c of [2, 1, 0]) for (const [x, y, m, i] of pts) if (m === c)
+    s += `<circle data-i="${i}" cx="${X(x).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="${SEL.size ? 5 : 4}" fill="${COLVAR[m]}" fill-opacity="${SEL.size ? 0.8 : 0.6}" stroke="${inCart.has(i) ? "var(--ink)" : "var(--panel)"}" stroke-width="${inCart.has(i) ? 1.6 : 0.8}"/>`;
+  s += `<path id="lasso" d="" fill="var(--accent)" fill-opacity="0.12" stroke="var(--accent)" stroke-dasharray="4 3"/>`;
+  s += `<text x="${(L + W) / 2}" y="${H - 6}" text-anchor="middle">Files directly in the folder</text><text transform="translate(13 ${(H - B) / 2}) rotate(-90)" text-anchor="middle">Real size of those files</text></svg>`;
+  const el = document.getElementById("scatter");
+  el.innerHTML = `<div class="legend">${legendHtml.replace(/: [^<]+/g, "")}<span><i style="background:var(--panel);border:2px solid var(--ink)"></i>has files in the cart</span></div>` + s;
+  setCap("cap-scatter", `<b>Figure ${FN(2)}.</b> Folders differ widely in how finely their data is split into files. One point per folder that directly holds files (n = ${fmtN(SCAT.length)}${SEL.size ? `, in ${esc(focusLabel())}` : ", all projects"}); x = number of files directly in it (subfolders not counted), y = their real size, both on log scales. Dotted lines mark a constant mean file size: points far to the right and below the 1 MiB line hold many small files, which slow scans and backups and are never archived (do not tar them yourself - bundling reads every file; ask IT). Colour = the colour holding most of the folder's bytes; a dark ring = some of its files are in the cart. Hover a point for the folder and its largest files; drag around points to put their folders' files in the cart (files of the cart type only) or, with "takes out of the cart" chosen above, to take them out again; right-click one point for the same.`);
+}
+// Lasso: drag on the figure to draw a shape; the folders inside go into the cart
+let SCAT = [], lassoPts = null;
+function svgPoint(svg, e) { const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); }
+function inside(x, y, poly) {
+  let ins = false;
+  for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
+    const [xa, ya] = poly[a], [xb, yb] = poly[b];
+    if ((ya > y) !== (yb > y) && x < (xb - xa) * (y - ya) / (yb - ya) + xa) ins = !ins;
+  }
+  return ins;
+}
+document.getElementById("scatter").addEventListener("mousedown", e => {
+  const svg = e.target.closest("svg"); if (!svg || e.button !== 0 || !FILES) return;
+  const p = svgPoint(svg, e); lassoPts = [[p.x, p.y]]; tip.style.display = "none"; e.preventDefault();
+});
+window.addEventListener("mousemove", e => {
+  if (!lassoPts) return;
+  const svg = document.querySelector("#scatter svg"), p = svgPoint(svg, e); lassoPts.push([p.x, p.y]);
+  document.getElementById("lasso").setAttribute("d", "M" + lassoPts.map(q => q.map(v => v.toFixed(1)).join(",")).join("L") + "Z");
+});
+window.addEventListener("mouseup", () => {
+  if (!lassoPts) return;
+  const poly = lassoPts; lassoPts = null;
+  const lasso = document.getElementById("lasso"); if (lasso) lasso.setAttribute("d", "");
+  if (poly.length < 4) return;                       // a click, not a drag
+  const dirs = SCAT.filter(([x, y]) => inside(x, y, poly)).map(q => q[2]);
+  if (!dirs.length) { toast("No folder inside the lasso"); return; }
+  if (S.lassoMode === "remove") removeFromCart(filesInDirs(dirs), `${fmtN(dirs.length)} folder(s) from the lasso`);
+  else addToCart(byAddCols(filesInDirs(dirs)), `${fmtN(dirs.length)} folder(s) from the lasso`);
+});
+// A folder's three largest files; while people are selected, theirs (the page needs its file list for that)
+function dirTop(i) {
+  if (!OWN.size) return {names: arr(D.top_names[i]), sizes: arr(D.top_sizes[i])};
+  if (!FILES) return {names: [], sizes: []};
+  const ks = BY_DIR[i].slice().sort((a, b) => FILES.size[b] - FILES.size[a]).slice(0, 3);
+  return {names: ks.map(k => FILES.name[k]), sizes: ks.map(k => FILES.size[k])};
+}
+// Tooltip: folder path, totals and its three largest files
+document.getElementById("scatter").addEventListener("mousemove", e => {
+  if (lassoPts) return;
+  const c = e.target.closest("circle"); if (!c) { tip.style.display = "none"; return; }
+  const i = +c.dataset.i, {names, sizes} = dirTop(i);
+  const col = [DCOL[0][i], DCOL[1][i], DCOL[2][i]], t = Math.max(DIR.dreal[i], 1);
+  tip.innerHTML = `<div class="p">${esc(PATH[i] || "(scanned folder)")}</div>
+    <div>${fmtN(DIR.dfiles[i])} files directly here, ${hs(DIR.dreal[i])} (mean ${hs(DIR.dreal[i] / DIR.dfiles[i])}/file)</div>
+    <div>green ${pct(col[0] / t)} · amber ${pct(col[1] / t)} · red ${pct(col[2] / t)}${D.p[i] >= 0 ? " · project " + esc(P[D.p[i]].name) : ""}</div>
+    ${names.length ? `<div style="margin-top:4px"><b>Largest files:</b></div>` + names.map((n, j) => `<div class="f">${esc(n)} (${hs(sizes[j])})</div>`).join("") : ""}`;
+  tip.style.display = "block";
+  const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8), y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8);
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+});
+document.getElementById("scatter").addEventListener("mouseleave", () => { tip.style.display = "none"; });
+
+// File numbers: folders with the most files directly in them, within the selection
+// Files directly in a folder, counted and sized per colour (from the file list when the
+// page has it; otherwise the folder's colour split by size stands in for the counts)
+function dirColourCounts(d) {
+  const n = [0, 0, 0], z = [0, 0, 0];
+  if (FILES) for (const k of BY_DIR[d]) { const c = fileColour(k); n[c]++; z[c] += FILES.size[k]; }
+  else for (let c = 0; c < 3; c++) { z[c] = DCOL[c][d]; n[c] = DIR.dfiles[d] * DCOL[c][d] / Math.max(DIR.dreal[d], 1); }
+  return {n, z};
+}
+function renderCounts() {
+  const top = [...Array(ND).keys()].filter(i => DIR.dfiles[i] > 0 && selected(D.p[i]))
+    .sort((a, b) => DIR.dfiles[b] - DIR.dfiles[a]).slice(0, 20);
+  const max = top.length ? DIR.dfiles[top[0]] : 1;
+  document.getElementById("bars-count").innerHTML = top.map(i => {
+    const {n} = dirColourCounts(i), t = Math.max(n[0] + n[1] + n[2], 1);
+    const inCart = FILES && BY_DIR[i].some(k => CART.has(k));
+    return `<div class="name" data-cd="${i}">${esc(short(PATH[i]) || "(scanned folder)")}</div>
+      <div class="track clickable" data-cd="${i}" style="width:${100 * DIR.dfiles[i] / max}%;min-width:2px">${segs(n, t)}</div>
+      <div class="num">${fmtN(DIR.dfiles[i])} · ${hs(DIR.dreal[i])} ${FILES ? `<button class="addbtn ${inCart ? "in" : ""}" data-addcd="${i}" title="${inCart ? "Some files are in the cart - click to take them out" : "Add this folder's files of the cart type"}">${inCart ? "✓" : "+"}</button>` : ""}</div>`;
+  }).join("") || `<div class="note">No folders in the projects shown.</div>`;
+  setCap("cap-count", `<b>Figure ${FN(3)}.</b> The folders holding the most individual files${SEL.size ? " in " + esc(focusLabel()) : ""}, where file-count limits bite. Bars = number of files directly in each folder (subfolders not counted), split by colour; label = count and their real size. Names show the first and the last two folders. Top ${top.length} of ${fmtN(nDirs())} folders. Hover a bar for the full path and what it would add; + (or right-click) puts the folder's files of the cart type in the cart, ✓ takes them out again.`);
+}
+// Hover a file-number bar: full path, counts and sizes per colour, what + would add
+document.getElementById("bars-count").addEventListener("mousemove", e => {
+  const el = e.target.closest("[data-cd]"); if (!el) { tip.style.display = "none"; return; }
+  const d = +el.dataset.cd, {n, z} = dirColourCounts(d), t = S.cartType;
+  const inCart = FILES ? BY_DIR[d].filter(k => CART.has(k)).length : 0;
+  tip.innerHTML = `<div class="p">${esc(PATH[d] || "(scanned folder)")}</div>
+    <div>${fmtN(DIR.dfiles[d])} files directly here, ${hs(DIR.dreal[d])}</div>
+    ${[0, 1, 2].map(c => n[c] ? `<div><span class="pill ${COLS[c]}">${COLS[c]}</span> ${fmtN(n[c])} files, ${hs(z[c])}</div>` : "").join("")}
+    ${D.p[d] >= 0 ? `<div class="f">project ${esc(P[D.p[d]].name)}</div>` : ""}
+    ${FILES ? `<div style="margin-top:6px;border-top:1px solid var(--line);padding-top:4px"><b>🛒 Click + or right-click</b> to add its <span class="pill ${COLS[t]}">${COLS[t]}</span> files (${fmtN(n[t])}, ${hs(z[t])}) to the cart${inCart ? `<br>${fmtN(inCart)} of its files are already in the cart` : ""}</div>` : ""}`;
+  tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + "px";
+});
+document.getElementById("bars-count").addEventListener("mouseleave", () => { tip.style.display = "none"; });
+document.getElementById("bars-count").addEventListener("click", e => {
+  const b = e.target.closest("button[data-addcd]"); if (!b) return;
+  const d = +b.dataset.addcd, ks = BY_DIR[d];
+  ks.some(k => CART.has(k)) ? removeFromCart(ks, PATH[d]) : addToCart(ks, PATH[d]);
+});
+
+// File types, split by colour
+function renderTypes() {
+  const nE = DATA.ext_names.length, by = Array.from({length: nE}, () => [0, 0, 0]), nf = new Float64Array(nE);
+  for (const [e, p, r, files, real] of TYPES) { if (!selected(p)) continue; by[e][EFF[p][r][0]] += real; nf[e] += files; }
+  const top = by.map((c, e) => [e, c[0] + c[1] + c[2]]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  const max = top.length ? top[0][1] : 1;
+  document.getElementById("legend-types").innerHTML = legendHtml;
+  document.getElementById("bars-types").innerHTML = top.map(([e, t]) => {
+    const c = by[e];
+    return `<div class="name">${esc(DATA.ext_names[e])}</div><div class="track clickable" data-e="${e}" style="width:${100 * t / max}%;min-width:2px" >${segs(c, t)}</div><div class="num">${hs(t)} · ${fmtN(nf[e])} files</div>`;
+  }).join("");
+  setCap("cap-types", `<b>Figure ${FN(4)}.</b> Which file types take the space, and how much of each the rules flag. Bars = summed real size per file type in ${SEL.size ? esc(focusLabel()) : "all projects"}, split by colour after your project settings; label = size and number of files. Type = last extension, keeping a compression suffix (.fastq.gz, .tar.gz); "(no extension)" = files without one, such as STAR genome indexes (SA, Genome) and git objects. Top 15 of ${fmtN(nE)} types. ${FILES ? "Hover a bar for the rules that cover the type; click a coloured part to list those files." : "Hover a bar for the rules that cover the type."}`);
+  renderTypeList();
+}
+// Files of one type and one colour (clicked in the file-types figure), within the selected projects
+let typePick = null;
+function typeListRows() {
+  if (!typePick || !FILES) return [];
+  const out = [];
+  for (let k = 0; k < FILES.d.length; k++) {
+    if (FILES.e[k] !== typePick.e || !fileOn(k)) continue;
+    const p = FILES.p[k]; if (!selected(p) || EFF[p][FILES.r[k]][0] !== typePick.c) continue;
+    out.push(k);
+  }
+  return out.sort((a, b) => FILES.size[b] - FILES.size[a]);
+}
+function renderTypeList() {
+  const el = document.getElementById("type-list");
+  if (!typePick || !FILES) { el.innerHTML = ""; return; }
+  const ks = typeListRows(), tot = ks.reduce((a, k) => a + FILES.size[k], 0);
+  const name = `${COLS[typePick.c]} ${DATA.ext_names[typePick.e]} files${SEL.size ? " in the selected projects" : ""}`;
+  el.innerHTML = `<div class="row" style="margin:10px 0 6px"><b style="flex:1">${esc(name)}: ${fmtN(ks.length)} files, ${hs(tot)}</b>
+      <button class="btn primary" id="type-add">Add all to cart</button><button class="btn" id="type-close">Close</button></div>
+    <div class="tablewrap"><table><tr><th></th><th>File</th><th class="n">Real size</th><th>Archived</th><th>Rule</th><th>Project</th></tr>` +
+    ks.slice(0, 200).map(k => `<tr><td>${addBtn(k)}</td><td style="word-break:break-all">${esc(filePath(k))}</td><td class="n">${hs(FILES.size[k])}</td><td>${FILES.arch[k] ? "yes" : "no"}</td><td class="why"><b>${R[FILES.r[k]].id}</b> ${esc(R[FILES.r[k]].title)}</td><td>${esc(P[FILES.p[k]].name)}</td></tr>`).join("") +
+    `</table></div>${ks.length > 200 ? `<div class="cap">The 200 largest of ${fmtN(ks.length)} are shown; "Add all to cart" takes every one.</div>` : ""}`;
+  document.getElementById("type-close").onclick = () => { typePick = null; renderTypeList(); };
+  document.getElementById("type-add").onclick = () => addToCart(ks, name);
+}
+// "+" button for one file: filled when the file is already in the cart
+const addBtn = k => `<button class="addbtn ${CART.has(k) ? "in" : ""}" data-addk="${k}" title="${CART.has(k) ? "In the cart - click to remove" : "Add to cart"}">${CART.has(k) ? "✓" : "+"}</button>`;
+document.addEventListener("click", e => {
+  const b = e.target.closest("button[data-addk]"); if (!b) return;
+  const k = +b.dataset.addk; CART.has(k) ? removeFromCart([k], "") : addToCart([k], "");
+});
+// Hover a file-type bar: the rules (policies) that cover this type, with colour and size
+document.getElementById("bars-types").addEventListener("mousemove", e => {
+  const tr = e.target.closest(".track[data-e]"); if (!tr) { tip.style.display = "none"; return; }
+  const ex = +tr.dataset.e, by = new Map();
+  for (const [e2, p, r, files, real] of TYPES) {
+    if (e2 !== ex || !selected(p)) continue;
+    const key = r + ":" + EFF[p][r][0], x = by.get(key) || {r, c: EFF[p][r][0], files: 0, real: 0};
+    x.files += files; x.real += real; by.set(key, x);
+  }
+  const rows = [...by.values()].sort((a, b) => b.real - a.real);
+  tip.innerHTML = `<div class="p">${esc(DATA.ext_names[ex])}: rules that apply</div>` +
+    rows.slice(0, 12).map(x => `<div><span class="pill ${COLS[x.c]}">${COLS[x.c]}</span> <b>${R[x.r].id}</b> ${esc(R[x.r].title)} <span class="f">- ${hs(x.real)}, ${fmtN(x.files)} files</span></div>`).join("") +
+    (rows.length > 12 ? `<div class="f">and ${rows.length - 12} more</div>` : "") +
+    (FILES ? `<div class="f" style="margin-top:4px">Click a colour to list its files.</div>` : "");
+  tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + "px";
+});
+document.getElementById("bars-types").addEventListener("mouseleave", () => { tip.style.display = "none"; });
+document.getElementById("bars-types").addEventListener("click", e => {
+  const seg = e.target.closest("span[data-c]"), tr = e.target.closest(".track[data-e]");
+  if (!seg || !tr || !FILES) return;
+  typePick = {e: +tr.dataset.e, c: +seg.dataset.c}; renderTypeList();
+  document.getElementById("type-list").scrollIntoView({block: "nearest"});
+});
+
+// ---------- Step 4: rules table (sortable) and largest files ----------
+let ruleSort = {k: "real", dir: -1};
+function renderRules() {
+  const rows = R.map((r, i) => ({i, id: r.id, title: r.title, colour: r.colour, files: 0, real: 0, arch: 0, eff: [0, 0, 0]}));
+  for (const [, p, r, files, real, , arch] of CELLS) {
+    if (!selected(p)) continue;
+    const x = rows[r]; x.files += files; x.real += real; x.arch += arch; x.eff[EFF[p][r][0]] += real;
+  }
+  const used = rows.filter(x => x.files > 0);
+  const key = {real: x => x.real, files: x => x.files, arch: x => x.arch, id: x => x.i, colour: x => COLS.indexOf(x.colour)}[ruleSort.k];
+  used.sort((a, b) => ruleSort.dir * (key(a) - key(b)));
+  const th = (k, lab, n) => `<th class="sortable ${n ? "n" : ""}" data-k="${k}">${lab}${ruleSort.k === k ? (ruleSort.dir < 0 ? " ▾" : " ▴") : ""}</th>`;
+  document.getElementById("rules-table").innerHTML = `<tr><th></th>${th("id", "Rule")}${th("colour", "Rule colour")}<th>What</th>${th("files", "Files", 1)}${th("real", "Real size", 1)}${th("arch", "Archived", 1)}<th>After your settings</th></tr>` +
+    used.map(x => `<tr data-rule="${x.i}"><td>${FILES ? `<button class="addbtn" data-addrule="${x.i}" title="Add this rule's files to the cart (files of the cart type only)">+</button>` : ""}</td><td><b>${x.id}</b></td><td><span class="pill ${x.colour}">${x.colour}</span></td><td>${esc(x.title)}</td><td class="n">${fmtN(x.files)}</td><td class="n">${hs(x.real)}</td><td class="n">${hs(x.arch)}</td><td>${cbar(...x.eff)}</td></tr>`).join("");
+  setCap("cap-rules", `<b>Table 3.</b> The cleanup rules that matched your files${SEL.size ? " in " + esc(focusLabel()) : ""} (rules version ${esc(M.rules_version)}; the first matching rule decides each file). Rule colour = what the rule recommends; After your settings = the same real size split by colour once project status, retention and sensitivity are applied. Archived = real size held only in the archive. Click a column header to sort; + (or right-click) puts the rule's files in the selected projects into the cart (files of the cart type only). ${M.repo_file ? "Raw FASTQ were matched against the repository list " + esc(M.repo_file) + "." : "No repository list was used, so no raw FASTQ can be shown as being in the sequencing repository: they all stay red (R1)."}`);
+}
+document.getElementById("rules-table").addEventListener("click", e => {
+  const ab = e.target.closest("button[data-addrule]");
+  if (ab) { const r = +ab.dataset.addrule; addToCart(byAddCols(filesWhere(k => FILES.r[k] === r && selected(FILES.p[k]))), "rule " + R[r].id); return; }
+  const k = e.target.closest("th")?.dataset.k; if (!k) return;
+  ruleSort = {k, dir: ruleSort.k === k ? -ruleSort.dir : -1}; renderRules();
+});
+// The 50 largest files of the shown projects: from the full file list when the page has
+// it, otherwise from the 100 largest files overall
+const TOP_DATE = new Map((DATA.top.k || []).map((k, j) => [k, DATA.top.date[j]]));
+function renderTop() {
+  let rows;
+  if (FILES) {
+    rows = filesWhere(k => selected(FILES.p[k])).sort((a, b) => FILES.size[b] - FILES.size[a]).slice(0, 50).map(k =>
+      ({k, path: filePath(k).slice(M.scan_root.length + 1), p: FILES.p[k], r: FILES.r[k], size: FILES.size[k], arch: FILES.arch[k], date: TOP_DATE.get(k) || "", o: HAS_OWNERS ? FILES.o[k] : 0}));
+  } else {
+    const t = DATA.top;
+    rows = t.path.map((path, j) => ({k: -1, path, p: t.p[j], r: t.r[j], size: t.size[j], arch: t.stubbed[j], date: t.date[j], o: arr(t.o)[j]})).filter(x => selected(x.p) && (!OWN.size || OWN.has(x.o))).slice(0, 50);
+  }
+  document.getElementById("top-table").innerHTML = `<tr><th></th><th>File</th><th class="n">Real size</th><th>Archived</th><th>Colour</th><th>Rule</th><th>Last change</th>${HAS_OWNERS ? "<th>Owner</th>" : ""}</tr>` +
+    rows.map(x => {
+      const c = COLS[EFF[x.p][x.r][0]];
+      return `<tr><td>${FILES ? addBtn(x.k) : ""}</td><td style="word-break:break-all">${esc(x.path)}</td><td class="n">${hs(x.size)}</td><td>${x.arch ? "yes" : "no"}</td><td><span class="pill ${c}">${c}</span></td><td class="why"><b>${R[x.r].id}</b> ${esc(R[x.r].title)}</td><td class="nowrap">${x.date}</td>${HAS_OWNERS ? `<td class="nowrap">${esc(OWNERS[x.o])}</td>` : ""}</tr>`;
+    }).join("");
+  setCap("cap-top", `<b>Table 2.</b> The ${rows.length} largest single files${SEL.size ? " in " + esc(focusLabel()) : ""}, out of ${fmtN(TOT.files)} in all projects. Real (logical) size; Archived = held only in the archive (≥ 64 KiB with < 10 % on disk); Colour = after your project settings; Rule = the cleanup rule that decided the file. Paths below ${esc(M.scan_root)}.`);
+}
+
+// ---------- Save and load progress: everything set on this page, as a file ----------
+const SAVE_BTNS = `<button class="btn" id="save-btn" style="padding:2px 8px">Save progress</button><button class="btn" id="load-btn" style="padding:2px 8px">Load progress</button><input type="file" id="load-file" accept=".json,application/json" hidden>`;
+document.addEventListener("click", e => {
+  if (e.target.id === "save-btn") {
+    const payload = {kind: "storage-report-progress", version: 1, scan_root: M.scan_root, built: M.built,
+                     projects: P.map(p => p.name), saved: new Date().toISOString(), state: Object.assign({}, S, {cart: [...CART]})};
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(payload)], {type: "application/json"}));
+    a.download = `storage_report_progress_${M.scan_root.split("/").filter(Boolean).slice(-2).join("_")}_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.json`;
+    a.click(); URL.revokeObjectURL(a.href); toast("Progress saved to your downloads");
+  }
+  if (e.target.id === "load-btn") document.getElementById("load-file").click();
+});
+document.addEventListener("change", e => {
+  if (e.target.id !== "load-file" || !e.target.files.length) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const x = JSON.parse(rd.result);
+      if (x.kind !== "storage-report-progress") throw new Error("not a progress file from this report");
+      if (x.scan_root !== M.scan_root) throw new Error(`it belongs to ${x.scan_root}, not ${M.scan_root}`);
+      // Match saved project choices by name, so a rebuilt report with more or fewer projects still loads
+      const at = new Map(x.projects.map((n, i) => [n, i])), st = x.state, d = defaults();
+      for (const key of ["status", "pubYear", "sensitive", "reviewed", "notes"])
+        S[key] = P.map((p, i) => at.has(p.name) && st[key] && st[key][at.get(p.name)] !== undefined ? st[key][at.get(p.name)] : d[key][i]);
+      for (const key of ["retNs", "retS", "cartType", "treeSort", "lassoMode", "projSort", "open"]) if (st[key] !== undefined) S[key] = st[key];
+      SEL.clear(); (st.sel || []).forEach(i => { if (x.projects[i] !== undefined && at.has(x.projects[i])) SEL.add(P.findIndex(p => p.name === x.projects[i])); });
+      SEL.delete(-1); S.sel = [...SEL];
+      OPEN.clear(); (S.open || []).forEach(i => OPEN.add(i));
+      CART.clear(); if (x.built === M.built) (st.cart || []).forEach(k => { if (FILES && k < FILES.d.length) CART.add(k); });
+      retNs.value = S.retNs; retS.value = S.retS;
+      document.querySelectorAll("input[name=carttype]").forEach(b => b.checked = +b.value === S.cartType);
+      applyCollapsed(); renderPicker(); refresh();
+      toast(x.built === M.built ? "Progress loaded" : "Progress loaded - the cart was left empty because this report was rebuilt since it was saved");
+    } catch (err) { alert("Could not load this file: " + err.message); }
+    e.target.value = "";
+  };
+  rd.readAsText(e.target.files[0]);
+});
+
+// ---------- Step 5: the cart - contents, estimate, export ----------
+function renderCart() {
+  const bar = document.getElementById("cartbar");
+  for (const id of ["focus3", "focus4"]) {
+    const el = document.getElementById(id); el.hidden = SEL.size === 0;
+    el.innerHTML = SEL.size ? `Showing only <b>${esc(focusLabel())}</b> (chosen in step 2). <a href="#" data-showall>Show all projects</a>` : "";
+  }
+  if (!FILES) {
+    bar.innerHTML = `<span style="flex:1"></span>${SAVE_BTNS}`;
+    document.getElementById("export-sum").innerHTML = "This report covers too many files to carry every file name, so there is no cart. Ask for a report of a smaller folder (for example one project).";
+    document.getElementById("export-btn").disabled = true; document.getElementById("cart-quick").disabled = true;
+    return;
+  }
+  const ks = [...CART].sort((a, b) => FILES.size[b] - FILES.size[a]);
+  const n = ks.length, byC = [0, 0, 0];
+  let size = 0, disk = 0, arch = 0;
+  // Archived files hold (almost) nothing on disk, so their size counts as archive space
+  for (const k of ks) { const z = FILES.size[k]; size += z; byC[fileColour(k)] += z; if (FILES.arch[k]) arch += z; else disk += z; }
+  // Red (keep) files must not be mixed with green or amber ones: one type of data per list
+  const nC = [0, 0, 0]; for (const k of ks) nC[fileColour(k)]++;
+  const t = S.cartType, off = ks.filter(k => fileColour(k) !== t);
+  const mixed = off.length > 0;
+  bar.innerHTML = `<span>🛒 Cart: <b>${fmtN(n)} files, ${hs(size)}</b> · type <span class="pill ${COLS[t]}">${COLS[t]}</span>${mixed ? ' <b style="background:#fff;color:var(--red);border-radius:4px;padding:0 6px">⚠ mixed types</b>' : ""}</span><a href="#cart-step">go to the cart (step 5)</a>${SEL.size ? `<span>· Showing <b>${esc(focusLabel())}</b> <a href="#" data-showall>show all</a></span>` : ""}<span style="flex:1"></span>${SAVE_BTNS}`;
+  const mw = document.getElementById("mix-warn"); mw.hidden = !mixed;
+  if (mixed) {
+    const offTxt = [0, 1, 2].filter(c => c !== t && nC[c]).map(c => `${fmtN(nC[c])} ${COLS[c]}`).join(" and ");
+    mw.innerHTML = `<b class="t">⚠ This cart is for ${COLS[t]} files but also holds ${offTxt} file(s) (${hs(off.reduce((a, k) => a + FILES.size[k], 0))}).</b> Work on one type of data at a time - ${t === 2 || nC[2] ? "red files need a separate decision by the data custodian and must never travel with green or amber ones" : "each list should hold one type, so the data custodian can judge it as a whole"}. This happens when you switch the cart type, or when a project's policy (step 2) changes a file's colour. <div class="row" style="margin-top:8px"><button class="btn primary" id="drop-off">Take the ${offTxt} file(s) out</button></div>`;
+    document.getElementById("drop-off").onclick = () => removeFromCart(off, "files not of the cart type");
+  }
+  document.getElementById("export-sum").innerHTML = n ? `<b>${fmtN(n)} files, ${hs(size)}</b> in the cart: ${COLS.map((c, i) => `${hs(byC[i])} ${c}`).join(", ")}.` +
+    (t === 2 && n && !mixed ? ` <span class="warn"><b>All of it is red (keep)</b> - the data custodian has to agree to each file.</span>` : "") :
+    "The cart is empty. Add files in steps 3 and 4 (lasso, right-click or +), or use the button above.";
+  const hiddenN = OWN.size ? ks.filter(k => !fileOn(k)).length : 0;
+  if (hiddenN) document.getElementById("export-sum").innerHTML += ` <b>${fmtN(hiddenN)} of these belong to people not currently selected.</b> The cart and the download always cover every file in it.`;
+  // A mixed cart cannot be downloaded until it holds one type again
+  document.getElementById("export-btn").disabled = n === 0 || mixed;
+  document.getElementById("export-btn").title = mixed ? "Take the files of other types out first" : "";
+  document.getElementById("cart-quick").textContent = `Add all ${COLS[t]} files of ${SEL.size ? focusLabel() : "all projects"}${OWN.size ? " owned by " + ownerLabel() : ""}`;
+  document.getElementById("type-hint").innerHTML = `Adding to the cart takes <span class="pill ${COLS[t]}">${COLS[t]}</span> files only - change the cart type in step 5.`;
+  const after = GRAND.real - size;
+  document.getElementById("sim-cards").innerHTML = [
+    ["Would free in total", hs(size), `${pct(size / GRAND.real)} of the report's ${hs(GRAND.real)}`],
+    ["On disk (about)", hs(disk), "files that are not archived"],
+    ["In the archive (about)", hs(arch), "files held only in the archive"],
+    ["You would keep", hs(after), `${fmtN(GRAND.files - n)} files`]
+  ].map(c => `<div class="card"><div class="k">${c[0]}</div><div class="v">${c[1]}</div><div class="s">${c[2]}</div></div>`).join("");
+  document.getElementById("sim-bar").innerHTML = `<div class="pbar" style="height:14px" title="removed ${hs(size)} of ${hs(GRAND.real)}"><span style="width:${100 * size / GRAND.real}%;background:var(--green)"></span></div>
+    <div class="cap"><b>Figure ${FN(5)}.</b> Share of your real size that deleting the cart would free (green part of the bar). Estimates: no file has been removed.</div>`;
+  // Figure 6: per project, the part in the cart (by colour) against everything it holds
+  const pc = P.map(() => [0, 0, 0]);
+  for (const k of ks) pc[FILES.p[k]][fileColour(k)] += FILES.size[k];
+  const rowsP = P.map((p, i) => [i, pc[i][0] + pc[i][1] + pc[i][2]]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  const maxP = Math.max(1, ...rowsP.map(([i]) => P[i].real0));
+  document.getElementById("cart-proj").innerHTML = rowsP.length ? rowsP.map(([i, t]) =>
+    `<div class="name">${esc(P[i].name)}</div><div class="track" style="width:${100 * P[i].real0 / maxP}%;min-width:2px;background:var(--kept)" title="${esc(P[i].name)}: ${hs(t)} of ${hs(P[i].real0)} in the cart">${segs(pc[i], P[i].real0)}</div><div class="num">${hs(t)} of ${hs(P[i].real0)}</div>`).join("") :
+    `<div class="note">Nothing in the cart yet.</div><div></div><div></div>`;
+  document.getElementById("cap-cart-proj").innerHTML = `<b>Figure ${FN(6)}.</b> How much of each project is in the cart. One bar per project with files in the cart (n = ${rowsP.length}); bar length = the project's real size, coloured part = the files in the cart by colour, grey = what stays. Estimates: no file has been removed.`;
+  // The cart's largest files, with a button to take each out again
+  document.getElementById("cart-list").innerHTML = n ? `<h3>In the cart (largest first)</h3><div class="tablewrap"><table><tr><th></th><th>File</th><th class="n">Real size</th><th>Colour</th><th>Rule</th><th>Project</th>${HAS_OWNERS ? "<th>Owner</th>" : ""}</tr>` +
+    ks.slice(0, 100).map(k => `<tr><td>${addBtn(k)}</td><td style="word-break:break-all">${esc(filePath(k))}</td><td class="n">${hs(FILES.size[k])}</td><td><span class="pill ${COLS[fileColour(k)]}">${COLS[fileColour(k)]}</span></td><td class="why"><b>${R[FILES.r[k]].id}</b> ${esc(R[FILES.r[k]].title)}</td><td>${esc(P[FILES.p[k]].name)}</td>${HAS_OWNERS ? `<td class="nowrap">${esc(OWNERS[FILES.o[k]])}</td>` : ""}</tr>`).join("") +
+    `</table></div>${n > 100 ? `<div class="cap">The 100 largest of ${fmtN(n)} files are shown; the download has every one.</div>` : ""}` : "";
+}
+document.getElementById("cart-quick").onclick = () =>
+  addToCart(filesWhere(k => selected(FILES.p[k]) && fileColour(k) === S.cartType), SEL.size ? focusLabel() : "all projects");
+document.getElementById("cart-clear").onclick = () => { if (CART.size && confirm(`Take all ${fmtN(CART.size)} files out of the cart?`)) { CART.clear(); toast("The cart is empty"); cartChanged(); } };
+const csvq = x => `"${String(x).replace(/"/g, '""')}"`;
+function filePath(k) { const d = FILES.d[k]; return M.scan_root + "/" + (PATH[d] ? PATH[d] + "/" : "") + FILES.name[k]; }
+function saveCsv(lines, label) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([lines.join("\n") + "\n"], {type: "text/csv"}));
+  a.download = `cleanup_list_${M.scan_root.split("/").filter(Boolean).slice(-2).join("_")}${label ? "_" + label : ""}_${TODAY.toISOString().slice(0, 10)}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+// One CSV line per file: rows are [file index, effective colour]
+function downloadFiles(rows, label) {
+  const lines = [["path", "size_bytes", "size", "colour", "rule", "rule_title", "archived", "project", "project_status", "file_owner"].join(",")];
+  for (const [k, c] of rows) {
+    const p = FILES.p[k], r = FILES.r[k];
+    lines.push([csvq(filePath(k)), FILES.size[k], csvq(hs(FILES.size[k])), COLS[c], R[r].id, csvq(R[r].title),
+                FILES.arch[k] ? "yes" : "no", csvq(P[p].name), csvq(stById[S.status[p]].label), csvq(HAS_OWNERS ? OWNERS[FILES.o[k]] : "")].join(","));
+  }
+  saveCsv(lines, label);
+}
+document.getElementById("export-btn").onclick = () =>
+  downloadFiles([...CART].sort((a, b) => a - b).map(k => [k, fileColour(k)]), "cart");
+
+// Project decisions (step 2) as a CSV
+document.getElementById("decisions-btn").onclick = () => {
+  const lines = [["file_owner", "project", "real_size_bytes", "real_size", "could_go_bytes", "status", "published_in", "sensitivity", "reviewed", "note", "green_bytes", "amber_bytes", "red_bytes"].join(",")];
+  P.forEach((p, i) => hasData(i) && lines.push([csvq(ownerLabel()), csvq(p.name), p.real, csvq(hs(p.real)), Math.round(PCOL[i][0] + PCOL[i][1]), csvq(stById[S.status[i]].label),
+    S.pubYear[i] || "", S.sensitive[i] ? "sensitive" : "not sensitive", S.reviewed[i] ? "yes" : "no", csvq(S.notes[i]),
+    Math.round(PCOL[i][0]), Math.round(PCOL[i][1]), Math.round(PCOL[i][2])].join(",")));
+  saveCsv(lines, "project_decisions");
+};
+
+// ---------- Usage by person: per-owner bars, and the selection that focuses the report ----------
+// Rules run on whole projects, so an owner's files keep the colour they have for everyone;
+// the selection only changes which files are added up and listed.
+function renderPeople() {
+  if (!HAS_OWNERS) return;
+  document.getElementById("people").hidden = false;
+  const by = OWNERS.map((name, o) => ({o, name, real: 0, files: 0, col: [0, 0, 0]}));
+  for (const c of ALL_CELLS) { const x = by[c[8]]; x.files += c[3]; x.real += c[4]; x.col[EFF[c[1]][c[2]][0]] += c[4]; }
+  by.sort((a, b) => b.real - a.real);
+  const max = Math.max(by[0].real, 1);
+  document.getElementById("legend-people").innerHTML = legendHtml;
+  document.getElementById("bars-people").innerHTML = by.map(x => {
+    const on = OWN.has(x.o), off = OWN.size && !on ? " off" : "";
+    return `<div class="name${off}" title="${esc(x.name)}"><label><input type="checkbox" data-own="${x.o}" ${on ? "checked" : ""} aria-label="Focus the report on ${esc(x.name)}"><span>${esc(x.name)}</span></label></div>
+      <div class="track${off}" data-ownbar="${x.o}" style="width:${100 * x.real / max}%;min-width:2px">${segs(x.col, Math.max(x.real, 1))}</div>
+      <div class="num${off}">${hs(x.real)} · ${pct(x.real / Math.max(GRAND.real, 1))} · ${fmtN(x.files)} files</div>`;
+  }).join("");
+  document.getElementById("cap-people").innerHTML = `<b>Figure 1.</b> How the ${hs(GRAND.real)} in this report divides between people. One bar per file owner (n = ${OWNERS.length}); bar length = real (logical) size of the files they own, split by colour after the project settings; label = real size, share of the total and number of files. Owner = the account that owns the file on disk, which may not be the person who made the data (pipelines, copies and shared accounts). "Unknown (ID n)" = an account with no name, often someone who has left. Folders the scan couldn't read are not counted. Source: ${esc(M.scans.join(", "))}.`;
+  const bar = document.getElementById("ownerbar");
+  bar.hidden = !OWN.size;
+  bar.innerHTML = OWN.size ? `Showing only <b>${esc(ownerLabel())}</b> (${hs(TOT.real)}, ${fmtN(TOT.files)} files of ${hs(GRAND.real)})<a href="#" id="owner-clear">Show everyone</a>` : "";
+}
+// The selection changed: re-add everything for the selected owners and redraw the page
+function ownersChanged() {
+  CELLS = OWN.size ? ALL_CELLS.filter(c => OWN.has(c[8])) : ALL_CELLS;
+  TYPES = OWN.size ? ALL_TYPES.filter(c => OWN.has(c[5])) : ALL_TYPES;
+  computeTotals();
+  rebuildByDir();
+  // A picked project with none of these owners' files would leave empty views
+  [...SEL].forEach(p => { if (!hasData(p)) SEL.delete(p); });
+  S.sel = [...SEL];
+  renderPicker(); refresh();
+}
+document.getElementById("bars-people").addEventListener("change", e => {
+  const o = +e.target.dataset.own; e.target.checked ? OWN.add(o) : OWN.delete(o); ownersChanged();
+});
+document.getElementById("bars-people").addEventListener("click", e => {
+  const el = e.target.closest("[data-ownbar]"); if (!el) return;
+  const o = +el.dataset.ownbar; OWN.has(o) ? OWN.delete(o) : OWN.add(o); ownersChanged();
+});
+document.getElementById("bars-people").addEventListener("mousemove", e => {
+  const el = e.target.closest("[data-ownbar]"); if (!el) { tip.style.display = "none"; return; }
+  const o = +el.dataset.ownbar; let real = 0, files = 0; const col = [0, 0, 0], ps = new Set();
+  for (const c of ALL_CELLS) if (c[8] === o) { files += c[3]; real += c[4]; col[EFF[c[1]][c[2]][0]] += c[4]; ps.add(c[1]); }
+  tip.innerHTML = `<div class="p">${esc(OWNERS[o])}</div><div>${hs(real)} real size, ${fmtN(files)} files, in ${ps.size} project(s)</div>` +
+    [0, 1, 2].map(c => col[c] > 0 ? `<div><span class="pill ${COLS[c]}">${COLS[c]}</span> ${hs(col[c])} (${pct(col[c] / Math.max(real, 1))})</div>` : "").join("") +
+    `<div class="f" style="margin-top:4px">Click to focus the report on them.</div>`;
+  tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + "px";
+});
+document.getElementById("bars-people").addEventListener("mouseleave", () => { tip.style.display = "none"; });
+const clearOwners = () => { OWN.clear(); ownersChanged(); };
+document.getElementById("people-all").onclick = clearOwners;
+document.addEventListener("click", e => { if (e.target.id === "owner-clear") { e.preventDefault(); clearOwners(); } });
+
+// ---------- Start ----------
+function refresh() { computeColours(); renderPeople(); renderCards(); renderProjectBars(); renderProjects(); renderFolderTree(); renderScatter(); renderCounts(); renderTypes(); renderRules(); renderTop(); renderCart(); persist(); }
+document.getElementById("meta").textContent =
+  `${M.scan_root} · scans: ${M.scans.join(", ")} · rules ${M.rules_version} · built ${M.built}` +
+  (M.n_outside ? ` · ${M.n_outside} file(s) outside this folder left out` : "");
+document.getElementById("notes").innerHTML = `<h2>Notes</h2><ul>
+  <li>Sizes come from a <b>metadata-only scan</b> (name, size, date, owner, space on disk). No file was opened, so nothing was brought back from the archive.</li>
+  <li>Colours are <b>recommendations</b> from the cleanup rules, not instructions. Removing anything needs the approval of the project's data custodian.</li>
+  <li><b>Only deletion is allowed.</b> Copying, moving, opening, compressing or tarring archived files recalls them from the archive, and many at once cause a recall storm. Data will be moved centrally during the migration.</li>
+  <li>Retention defaults: ${DATA.retention.nonsensitive_years} years (not sensitive) and ${DATA.retention.sensitive_years} years (sensitive), from national and Victorian guidance; your project's ethics approval or funding agreement may require longer.</li>
+  <li>Folders without any files do not appear; hard links are counted once.</li>${HAS_OWNERS ? `<li>Choosing people changes which files are shown, not their colours: rules, project status and sensitivity always use the whole project, and a project's Last change is for the whole project.</li>` : ""}</ul>`;
+retNs.value = S.retNs; retS.value = S.retS;
+// Click a step's number (or a subsection heading I-V) to hide or show it
+const STEPS = [...document.querySelectorAll("section.step")].filter(x => x.querySelector("h2 .num"));
+const SUBS = [...document.querySelectorAll(".subsec")];
+// Every step and subsection starts open when the page is opened; hiding lasts for this visit only
+S.collapsed = []; S.subCollapsed = [];
+function applyCollapsed() {
+  STEPS.forEach((sec, j) => sec.classList.toggle("collapsed", S.collapsed.includes(j)));
+  SUBS.forEach((sec, j) => sec.classList.toggle("collapsed", S.subCollapsed.includes(j)));
+}
+const onKey = flip => e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } };
+STEPS.forEach(sec => {
+  const num = sec.querySelector("h2 .num");
+  num.title = "Click to hide or show this step"; num.setAttribute("role", "button"); num.tabIndex = 0;
+  const flip = () => { sec.classList.toggle("collapsed"); S.collapsed = STEPS.map((x, i) => x.classList.contains("collapsed") ? i : -1).filter(i => i >= 0); persist(); };
+  num.onclick = flip; num.onkeydown = onKey(flip);
+});
+SUBS.forEach(sec => {
+  const h = sec.querySelector("h3"); h.setAttribute("role", "button"); h.tabIndex = 0; h.title = "Click to hide or show";
+  const flip = () => { sec.classList.toggle("collapsed"); S.subCollapsed = SUBS.map((x, i) => x.classList.contains("collapsed") ? i : -1).filter(i => i >= 0); persist(); };
+  h.onclick = flip; h.onkeydown = onKey(flip);
+});
+applyCollapsed();
+// Lasso mode: add to or take out of the cart
+document.querySelectorAll("input[name=lasso]").forEach(r => {
+  r.checked = r.value === (S.lassoMode || "add");
+  r.onchange = () => { S.lassoMode = r.value; persist(); };
+});
+renderPicker(); refresh();
+</script>
+</body>
+</html>

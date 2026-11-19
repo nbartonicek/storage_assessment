@@ -994,7 +994,7 @@ function renderCart() {
   }
   if (!FILES) {
     bar.innerHTML = `<span style="flex:1"></span>${SAVE_BTNS}`;
-    document.getElementById("export-sum").innerHTML = "This report covers too many files to carry every file name, so there is no cart. Ask for a report of a smaller folder (for example one project).";
+    document.getElementById("export-sum").innerHTML = `This report covers too many files to carry every file name, so there is no cart. Every file, with its size, owner, project and rule, is in <b>${esc(M.file_list || "the _files.tsv.gz list")}</b> next to this page (open it in Excel or R), or ask for a report of a smaller folder (for example one project).`;
     document.getElementById("export-btn").disabled = true; document.getElementById("cart-quick").disabled = true;
     return;
   }
@@ -1140,7 +1140,10 @@ document.addEventListener("click", e => { if (e.target.id === "owner-clear") { e
 function refresh() { computeColours(); renderPeople(); renderCards(); renderProjectBars(); renderProjects(); renderFolderTree(); renderScatter(); renderCounts(); renderTypes(); renderRules(); renderTop(); renderCart(); persist(); }
 document.getElementById("meta").textContent =
   `${M.scan_root} · scans: ${M.scans.join(", ")} · rules ${M.rules_version} · built ${M.built}` +
-  (M.n_outside ? ` · ${M.n_outside} file(s) outside this folder left out` : "");
+  (M.n_outside ? ` · ${M.n_outside} file(s) outside this folder left out` : "") +
+  // Older reports have no n_dirs_all; only say something when folders were merged
+  (M.n_dirs_all > M.n_dirs_shown ? ` · the ${fmtN(M.n_dirs_shown)} largest of ${fmtN(M.n_dirs_all)} folders shown, smaller ones merged into their parent folder` : "") +
+  (M.file_list ? ` · full file list: ${M.file_list}` : "");
 document.getElementById("notes").innerHTML = `<h2>Notes</h2><ul>
   <li>Sizes come from a <b>metadata-only scan</b> (name, size, date, owner, space on disk). No file was opened, so nothing was brought back from the archive.</li>
   <li>Colours are <b>recommendations</b> from the cleanup rules, not instructions. Removing anything needs the approval of the project's data custodian.</li>

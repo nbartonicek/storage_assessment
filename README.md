@@ -94,8 +94,8 @@ report, and their contents aren't in your report.
 
 ## 5. Open the report
 
-The report is `results/<name>/storage_report.html`. Copy that one file to your own computer and
-double-click it. It needs no internet connection. It lists folder and file names and the account
+The report is `results/<name>/storage_report.html`, with the full file list
+`storage_report_files.tsv.gz` beside it. Copy the page to your own computer and double-click it. It needs no internet connection. It lists folder and file names and the account
 names of file owners, so share it only with people who should see them. Never add `results/` to a
 public repository.
 
@@ -160,8 +160,19 @@ the page.
   no commands. Delete files only after that approval.
 - Treat deletion as permanent. Don't assume a deleted file can be restored unless your storage team
   has confirmed it.
-- Very large folders: above 500,000 files the page leaves out the per-file list, so clicking a file
-  type won't list its files, and the cart is switched off.
+- Very large folders: to keep the page small enough to open, it shows the 20,000 largest folders
+  (smaller ones are merged into their parent, so every file and byte still counts), and above
+  250,000 files it leaves out the per-file list, so clicking a file type won't list its files and
+  the cart is switched off. Every file is always in `storage_report_files.tsv.gz` next to the page
+  (path, size, date, owner, project, rule), which opens in Excel or R. Change the limits with the
+  `DIR_MAX` and `FILE_LIST_MAX` settings below.
+- **Rebuild the report without scanning again:** the scan file stays valid, so after updating the
+  toolkit you can rebuild the page from it. From the `scripts` folder:
+  ```bash
+  OUT=../results/<name>/storage_report.html Rscript 02_build_storage_report.R /the/folder/you/scanned ../results/<name>/scan_<date>.tsv.gz
+  ```
+  If you have the repository list, add `REPO_FILE=../data/repo_fastqs_<date>.tsv.gz` in front. Add
+  `DIR_MAX=5000` or `FILE_LIST_MAX=100000` in front to make the page smaller still.
 - **Sequencing repository list:** not included here. Without it, every raw FASTQ file stays red,
   because the toolkit can't tell whether the repository holds a copy. If you were given a list, put it
   in `data/` (see `data/README.md`).

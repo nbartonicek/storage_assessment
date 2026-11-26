@@ -346,7 +346,7 @@ function computeEff() {
       if (y === null || y < limit) return [cat === "raw" ? 2 : 1, true];
     }
     // Sensitive data is one step more cautious: green becomes amber
-    if (S.sensitive[p] && base === 0) return [1, false];
+    if (S.sensitive[p] && base === 0 && !r.sensitive_ok) return [1, false];   // unless the rule says another copy is held (sensitive_ok)
     return [base, false];
   }));
 }

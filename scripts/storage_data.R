@@ -1,4 +1,4 @@
-# Used by 02_build_storage_report.R:
+# Used by 02_build_storage_report.R and 02b_build_overview.R:
 # read scans, classify every file with the cleanup rules, suggest each project's status
 # and sensitivity, and embed data into an HTML template. Function library only.
 # Metadata only: reads scan files (01b output), never the scanned data.
@@ -39,6 +39,10 @@ load_classified <- function(scans, scan_root, project_level = 1L, repo_file = ""
           colClasses = list(character = intersect(c("path", "owner"), header), numeric = intersect(c("size_bytes", "alloc_blocks"), header)), integer64 = "double")
   }
   s <- rbindlist(lapply(scans, rd), fill = TRUE)
+  # File names that are not valid text (stray bytes) would stop the string functions below;
+  # show each bad byte as <xx> instead. Only those names change, never sizes or counts.
+  bad <- !validUTF8(s$path)
+  if (any(bad)) s[bad, path := iconv(path, "UTF-8", "UTF-8", sub = "byte")]
   if ("inode" %in% names(s)) s <- s[is.na(inode) | !(nlinks > 1 & duplicated(inode))]
   inside <- startsWith(s$path, paste0(scan_root, "/"))
   n_outside <- sum(!inside)

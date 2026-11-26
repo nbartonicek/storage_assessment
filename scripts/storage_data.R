@@ -65,6 +65,23 @@ load_classified <- function(scans, scan_root, project_level = 1L, repo_file = ""
   # find prints a number when an account has no name, often someone who has left
   f[is.na(owner) | owner == "", owner := "(not recorded)"]
   f[grepl("^[0-9]+$", owner), owner := sprintf("Unknown (ID %s)", owner)]
+  # A modification date after the scan is impossible (a wrong clock or a damaged timestamp; seen up to
+  # the year 2101). Such a file takes the newest real date in its folder, else in its project, else
+  # the build time, so it can't make a project look recently changed. The count is reported.
+  fut <- which(f$mtime > now)
+  if (length(fut)) {
+    fdir <- dirname(f$rel_root); need <- unique(fdir[fut])
+    sel <- which(fdir %chin% need & f$mtime <= now)
+    by_dir <- data.table(d = fdir[sel], t = as.numeric(f$mtime[sel]))[, .(t = max(t)), by = d]
+    by_proj <- f[mtime <= now & project %chin% unique(f$project[fut]), .(t = max(as.numeric(mtime))), by = project]
+    v <- by_dir$t[match(fdir[fut], by_dir$d)]
+    miss <- is.na(v); v[miss] <- by_proj$t[match(f$project[fut][miss], by_proj$project)]
+    v[is.na(v)] <- as.numeric(now)
+    f[fut, mtime := as.POSIXct(v, origin = "1970-01-01")]
+    message(sprintf("%d file(s) dated after the scan took the newest real date of their folder or project", length(fut)))
+    rm(fdir, need, sel, by_dir, by_proj, v, miss)
+  }
+  rm(fut)
 
   # Archived (stubbed) files: >= 64 KiB with < 10 % allocated
   f[, stubbed := size_bytes >= 64 * 1024 & alloc_bytes < 0.10 * size_bytes]

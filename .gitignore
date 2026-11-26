@@ -1,0 +1,7 @@
+results/
+storage_report_*.log
+data/*.tsv.gz
+.DS_Store
+._*
+storage_tabbed_*.log
+storage_lowmem_*.log

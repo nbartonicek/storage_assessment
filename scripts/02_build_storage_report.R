@@ -147,10 +147,11 @@ files <- if (nrow(f) <= file_max)
 # The colour here is before project settings; the page applies those.
 rule_ids <- c(vapply(x$rules$rules, `[[`, "", "id"), x$rules$default$id)
 rule_cols <- c(vapply(x$rules$rules, `[[`, "", "colour"), x$rules$default$colour)
-list_file <- sub("\\.html?$", "", out_file)
-list_file <- paste0(list_file, "_files.tsv.gz")
-dir.create(dirname(list_file), showWarnings = FALSE, recursive = TRUE)
-fwrite(f[order(-size_bytes), .(path = file.path(x$scan_root, rel_root), size_bytes, modified = format(mtime, "%Y-%m-%d"),
+# WRITE_FILE_LIST=0 skips it (the overview page, 02b, has no cart, so it needs no list)
+write_list <- Sys.getenv("WRITE_FILE_LIST", "1") != "0"
+list_file <- if (write_list) paste0(sub("\\.html?$", "", out_file), "_files.tsv.gz") else ""
+if (write_list) dir.create(dirname(list_file), showWarnings = FALSE, recursive = TRUE)
+if (write_list) fwrite(f[order(-size_bytes), .(path = file.path(x$scan_root, rel_root), size_bytes, modified = format(mtime, "%Y-%m-%d"),
                                owner, project, rule = rule_ids[r + 1L], rule_colour = rule_cols[r + 1L], archived = as.integer(stubbed))],
        list_file, sep = "\t", quote = FALSE, compress = "gzip")
 
@@ -162,7 +163,7 @@ data <- c(list(meta = list(
   rules_version = x$rules$version, built = format(now, "%Y-%m-%d %H:%M"),
   active_months = x$rules$thresholds$active_months, n_files = nrow(f),
   project_level = project_level, has_files = length(files) > 0,
-  n_dirs_all = n_dirs_all, n_dirs_shown = nrow(dirs), file_list = basename(list_file))),
+  n_dirs_all = n_dirs_all, n_dirs_shown = nrow(dirs), file_list = if (write_list) basename(list_file) else "")),
   page_common(x),
   list(dirs = list(name = dirs$name, parent = dirs$parent, p = dirs$p,
                    top_names = dirs$top_names, top_sizes = dirs$top_sizes),
@@ -174,7 +175,7 @@ data <- c(list(meta = list(
        years = unname(as.matrix(years[, .(year, p, r, files, real, arch, o)])),
        top = list(path = I(top$path), p = I(top$p), r = I(top$r), size = I(top$size),
                   stubbed = I(top$stubbed), date = I(top$date), k = I(top$k), o = I(top$o))))
-# A wrapper script can adjust the data and use its own template
+# A wrapper script can adjust the data and use its own template (see 02b_build_overview.R)
 if (exists("prepare_page_data")) data <- prepare_page_data(data)
 size <- embed_page(data, Sys.getenv("TEMPLATE", "storage_report_template.html"), out_file)
 cat(sprintf("Wrote %s (%.0f KB): %s files, %d folders, %d projects (%d outside %s left out), rules %s\n",
@@ -186,7 +187,7 @@ if (nrow(dirs) < n_dirs_all)
 if (!length(files))
   cat(sprintf("Files: %s is more than FILE_LIST_MAX (%s), so the page has no cart; the full list is beside it.\n",
               format(nrow(f), big.mark = ","), format(file_max, big.mark = ",", scientific = FALSE)))
-cat(sprintf("Full file list: %s\n", list_file))
+if (write_list) cat(sprintf("Full file list: %s\n", list_file))
 # Warn when the page may be slow to open
 if (size > 50 * 1024^2)
   cat(sprintf("WARNING: the page is %.0f MB and may be slow or fail to open. Lower DIR_MAX or FILE_LIST_MAX, or report a smaller folder.\n", size / 1024^2))

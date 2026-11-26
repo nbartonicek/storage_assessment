@@ -1,4 +1,4 @@
-# Storage report toolkit (cart version)
+# Storage report toolkit (cart version, with tabbed and low-memory versions for large data)
 
 Run your own storage report and cleanup list on the cluster. You run one command, wait for it to
 finish, then open one web page in a browser. It shows how much storage your folders use, where it
@@ -9,11 +9,22 @@ The job reads file details only: names, sizes, dates, owners and space on disk. 
 files, so nothing is brought back from the archive, and it doesn't change, move, copy or delete
 anything.
 
+For several folders, folders on different volumes, or tens of millions of files, use the separate
+`run_tabbed_report.sh` instead: one tab per folder, with build jobs sized to the data. See
+[Tabbed report](#tabbed-report-for-several-folders-or-very-large-data). For the very largest data,
+or millions of small files, `run_low_memory_report.sh` makes the same tabbed report in one job with
+far less memory. See [Low-memory report](#low-memory-report-for-the-largest-data).
+
 ## What's in this repository
 
 | File | What it does |
 |---|---|
 | `run_my_report.sh` | The job you submit. Runs the two steps below and says where the report is. |
+| `run_tabbed_report.sh` | The tabbed version, for several folders or very large data: one tab per folder, each with an overview and a cart page (see [Tabbed report](#tabbed-report-for-several-folders-or-very-large-data)). |
+| `scripts/03_split_tabs.sh`, `scripts/04_build_page.sh`, `scripts/05_write_index.sh` | Used by the tabbed version: split the scan into tabs, build one page, write the front page. |
+| `scripts/02b_build_overview.R`, `scripts/storage_overview_template.html` | Used by the tabbed version: build the overview page. |
+| `run_low_memory_report.sh` | The low-memory version of the tabbed report, for the largest data: every page built in one job (see [Low-memory report](#low-memory-report-for-the-largest-data)). |
+| `scripts/01a_build_low_memory.R` | Used by the low-memory version: reads the scan once and builds every tab's overview and cart; combines small files in very large scans. |
 | `scripts/01_scan_storage.sh` | Step 1: lists every file's details with `find -printf` into `scan_<date>.tsv.gz`. |
 | `scripts/02_build_storage_report.R` | Step 2: classifies the files with the rules and writes `storage_report.html`. |
 | `scripts/cleanup_classifier.R`, `scripts/storage_data.R` | Used by step 2: apply the rules and prepare the page's data. |
@@ -137,6 +148,126 @@ who is selected, and **Show everyone** clears it. With one owner, this section d
   project.
 - The cart keeps what you added, whoever is selected. Its totals and download always cover every file
   in it, and each file's owner is listed.
+
+## Tabbed report for several folders or very large data
+
+`run_tabbed_report.sh` is a separate job script for when one page isn't enough: several folders,
+folders on different volumes, or tens of millions of files. Steps 1 and 2 above are the same. It uses
+the same rules and the same cart page as `run_my_report.sh`, so the colours match.
+
+What you get, in `results/<name>/storage_report/`:
+
+- **One tab per folder you give**, plus a **Total** tab when you give several. In each folder's tab,
+  its sub-folders are the projects. The folders may be on different volumes, e.g. a `/researchers`
+  folder and a lab or department share.
+- **Two pages per tab:** **Overview (by time)** shows where the data sits, which projects and people
+  hold it, what kinds of files it is and how old it is. **Cart and files** is the page described in
+  [Reading the report](#reading-the-report), with its full file list `cart_files.tsv.gz`.
+- **`index.html`**, the front page: buttons at the top pick the tab and the page.
+
+### Submit it
+
+From inside the toolkit folder, as in step 3:
+
+```bash
+sbatch run_tabbed_report.sh /path/to/folder1 /path/to/folder2
+```
+
+The scan needs little memory, but it can take longer than 8 hours for tens of millions of files. Then
+submit it on the long partition:
+
+```bash
+sbatch --partition=rhel_long --time=3-00:00:00 run_tabbed_report.sh /path/to/folder1 /path/to/folder2
+```
+
+After the scan, the job counts the files in every tab:
+
+- **Up to 300,000 files in every tab:** it builds all the pages itself and its log ends with `FINISHED`.
+- **More:** its log ends with `SCANNED` and lists the jobs it submitted, one per page (the overview
+  and the cart of each tab, side by side). Each gets 10 GB per million files plus 4 GB. Tabs over
+  2 million files go to `rhel_long` for up to 3 days. A last small job rewrites the front page when
+  they have all ended. The report is ready when `squeue -u $USER` no longer lists them. Their logs are
+  in `results/<name>/logs/`.
+- **A tab needing more than 900 GB** is not submitted. The log prints its command (`NOT SUBMITTED`)
+  so you can submit it where the memory is, then rewrite the front page as it says.
+
+The Total tab holds every file, so it is the biggest. As a guide, 27 million files need about 275 GB
+and many hours. Change the limits by setting them in front of `sbatch`, e.g.
+`GB_PER_MILLION=12 MAX_MEM_GB=1000 sbatch run_tabbed_report.sh ...` (also `SHORT_PARTITION`,
+`LONG_PARTITION`, `SHORT_TIME`, `LONG_TIME`, `SHORT_MAX_FILES`, `INLINE_MAX_FILES`). The build jobs use
+the R you have loaded when you submit.
+
+### Open it and share it
+
+Open `index.html` in `results/<name>/storage_report/`. A page that is still being built, or failed,
+says so.
+
+**`index.html` alone is not the report.** It opens the pages in the sub-folders beside it, one per
+tab, so copy or send the **whole `storage_report` folder**, e.g. as a zip:
+
+```bash
+cd results/<name> && zip -r storage_report.zip storage_report
+```
+
+The receiver unzips it and opens `index.html` from the unzipped folder, not from inside the zip.
+Each tab's `cart_files.tsv.gz` is the biggest part. If the zip is too big to send, add
+`-x '*/cart_files.tsv.gz'`; then only the cart's full-list download stops working. Share big reports
+through a file-sharing link rather than email. As with the single page, the pages list folder, file
+and account names, so share them only with people who should see them.
+
+### If a page could not be built
+
+Read `storage_report/<tab>/<page>_messages.txt` and the job's log in `results/<name>/logs/`. To build
+one page again, e.g. with more memory after running out, from the `scripts` folder:
+
+```bash
+sbatch --partition=rhel_long --time=3-00:00:00 --mem=300G --wrap="bash 04_build_page.sh ../results/<name> <tab> cart"
+bash 05_write_index.sh ../results/<name>
+```
+
+`<tab>` is the tab's folder name in `storage_report/` (e.g. `total`), and `cart` can be `overview`.
+Submitting the same folders again on the same day reuses that day's scan and rebuilds every page.
+`results/<name>/tabs/` holds a copy of the scan split by tab; delete it once the report is built.
+
+## Low-memory report for the largest data
+
+`run_low_memory_report.sh` makes the same report as `run_tabbed_report.sh` (a Total and one tab per
+folder, each with an overview and a cart page) for data too large for it: tens of millions of files,
+or folders full of small files. The tabbed version builds each page in its own job, and each job reads
+and classifies the whole scan again. This version builds every page in **one job** that reads the
+scan once and classifies each tab once (`scripts/01a_build_low_memory.R`).
+
+Above 5 million files it also **combines small files**: files under 1 MB become one row per folder,
+file type, owner, year last changed and archived status, named like `[12,345 files under 1 MB].bam`.
+Small files usually hold little of the data but most of the rows, and memory grows with rows.
+What stays exact: sizes, file counts, space on disk, archived sizes and the time view. What becomes
+approximate: the colours of those small files (the rules see one row per folder and type), copies
+among small files, and the cart's file list (it shows the combined rows). Small files the rules
+need by name stay on their own (FASTQ, run records, RNA-SeQC summaries, Cell Ranger matrices and
+others). The front page says when small files were combined.
+
+**Checked**: on a 253,000-file scan with a Total and three folder tabs, every page was the same as
+the tabbed version's, in half the time (192 s against 369 s). With small files combined, every tab's
+size and file count were the same. On 2 million files with small files combined, the build peaked
+at 3.1 GB, where the tabbed version plans 24 GB.
+
+### Submit it
+
+From the toolkit folder, as for the other versions:
+
+```bash
+sbatch run_low_memory_report.sh /path/to/folder1 /path/to/folder2
+```
+
+This job scans, then submits **one** build job with the memory the whole scan needs: 10 GB per
+million files plus 4 up to 5 million files, and 2 GB per million plus 16 above that (so about 140 GB
+for 60 million files). Up to 300,000 files the pages are built in the first job. Its log says which
+build job was submitted and where its log is. To change the defaults, set them in front of `sbatch`,
+e.g. `LUMP_GB_PER_MILLION=3 sbatch run_low_memory_report.sh ...`; `LUMP_ABOVE` sets when small files
+are combined (e.g. `LUMP_ABOVE=0` to always combine them, a very large number to never).
+
+The report opens and is shared the same way as the tabbed version's
+([Open it and share it](#open-it-and-share-it)).
 
 ## If something goes wrong
 

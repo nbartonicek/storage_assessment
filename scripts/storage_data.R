@@ -169,7 +169,7 @@ effective_colour <- function(f, proj, rules_raw, now = Sys.time()) {
     data.table(data_category = x$id, max_colour = x$max_colour, all_red = isTRUE(x$all_red),
                derived_red = isTRUE(x$derived_red), years = as.numeric(x$retention_years))))
   st <- rbindlist(lapply(rules_raw$project_status, function(s) data.table(status = s$id, clock = s$clock, locked = list(unlist(s$locked)))))
-  colours <- rbindlist(lapply(c(rules_raw$rules, list(rules_raw$default)), function(r) data.table(rule_id = r$id, colour = r$colour)))
+  colours <- rbindlist(lapply(c(rules_raw$rules, list(rules_raw$default)), function(r) data.table(rule_id = r$id, colour = r$colour, sensitive_ok = isTRUE(r$sensitive_ok))))
   pj <- merge(merge(proj[, .(project, status, last_change, data_category, required_record)], st, by = "status"), cats, by = "data_category")
   pj[, held_years := as.numeric(difftime(now, as.POSIXct(as.Date(last_change)), units = "days")) / 365.25]
   x <- merge(f[, .(id = .I, project, rule_id, category, file_class, lineage)], pj, by = "project", sort = FALSE)
@@ -178,7 +178,7 @@ effective_colour <- function(f, proj, rules_raw, now = Sys.time()) {
   x[, eff := colour]
   x[held == TRUE & category == "raw", eff := "red"]
   x[held == TRUE & category != "raw" & eff == "green", eff := "amber"]
-  x[max_colour == "amber" & eff == "green", eff := "amber"]
+  x[max_colour == "amber" & eff == "green" & !sensitive_ok, eff := "amber"]   # a copy held elsewhere (sensitive_ok) stays green
   x[required_record == TRUE & eff == "green", eff := "amber"]
   x[required_record == TRUE & lineage == "raw_not_found", eff := "red"]
   x[derived_red == TRUE & file_class %chin% c("primary", "derived"), eff := "red"]
@@ -197,7 +197,7 @@ page_common <- function(x) {
                      sensitive_years = rr$retention$sensitive_years,
                      sources = I(unlist(rr$retention$sources))),
     rules = lapply(c(rr$rules, list(rr$default)), function(r)
-      list(id = r$id, title = r$title, colour = r$colour, category = r$category)),
+      list(id = r$id, title = r$title, colour = r$colour, category = r$category, sensitive_ok = isTRUE(r$sensitive_ok))),
     projects = lapply(seq_len(nrow(x$proj)), function(i) with(x$proj[i], list(
       name = project, files = files, real = real, last_change = format(last_change, "%Y-%m-%d"),
       sensitive = sensitive, sensitive_why = sensitive_why, status = status))))

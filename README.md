@@ -2,7 +2,7 @@
 
 Run your own storage report and cleanup list on the cluster. You run one command, wait for it to
 finish, then open one web page in a browser. It shows how much storage your folders use, where it
-sits, what kinds of files it holds, and how the cleanup rules (version 0.7.0, in
+sits, what kinds of files it holds, and how the cleanup rules (version 0.7.1, in
 `rules/cleanup_rules.yaml`) classify them.
 
 The job reads file details only: names, sizes, dates, owners and space on disk. It never opens your
@@ -29,7 +29,7 @@ far less memory. See [Low-memory report](#low-memory-report-for-the-largest-data
 | `scripts/02_build_storage_report.R` | Step 2: classifies the files with the rules and writes `storage_report.html`. |
 | `scripts/cleanup_classifier.R`, `scripts/storage_data.R` | Used by step 2: apply the rules and prepare the page's data. |
 | `scripts/storage_report_template.html` | The report page that step 2 fills in. |
-| `rules/cleanup_rules.yaml` | The cleanup rules, version 0.7.0, with what each rule means and why. |
+| `rules/cleanup_rules.yaml` | The cleanup rules, version 0.7.1, with what each rule means and why. |
 | `data/` | Optional sequencing-repository list (see `data/README.md`). |
 
 ## What you need

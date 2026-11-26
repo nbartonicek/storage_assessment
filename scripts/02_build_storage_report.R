@@ -165,7 +165,7 @@ data <- c(list(meta = list(
   project_level = project_level, has_files = length(files) > 0,
   n_dirs_all = n_dirs_all, n_dirs_shown = nrow(dirs), file_list = if (write_list) basename(list_file) else "")),
   page_common(x),
-  list(dirs = list(name = dirs$name, parent = dirs$parent, p = dirs$p,
+  list(dirs = list(name = I(dirs$name), parent = I(dirs$parent), p = I(dirs$p),   # I(): stays a list with one folder
                    top_names = dirs$top_names, top_sizes = dirs$top_sizes),
        files = files,
        owners = if (has_owners) I(owner_names) else I(character()),

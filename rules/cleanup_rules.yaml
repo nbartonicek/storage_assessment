@@ -18,12 +18,14 @@
 #   exclude_path_regex  rule does NOT apply when the path matches this
 #   min_mb / max_mb     size limits; a number or the name of a threshold below
 #   requires            list of conditions (see "conditions"); "!" in front = must be false
+#   sensitive_ok        true = stays green in sensitive projects (another copy is held), instead of turning amber
 # Any regex may instead name a shared pattern with "@name" (see "patterns").
 
-version: 0.7.0
+version: 0.7.1
 status: draft - for working group review
-last_changed: 2026-11-07
+last_changed: 2026-11-27
 changes:
+  0.7.1: Copies held in an archive area count as a copy for raw FASTQ (G4, A1) - the sequencing repository (/pipeline/Archives), /pipeline/Runs, /dawson_mediaflux and /home/outsourced_fastq_runs; the list is made from the run's FASTQ database. G4 stays green in sensitive and patient projects (sensitive_ok), as the data is held in the archive area. Uncompressed files that also exist compressed are green (G16, was A4b), also in sensitive projects. A1 stays amber - name + size is not proof of identical content.
   0.7.0: Each file now also gets a file class, origin, lineage and folder idle time, kept separate from its colour. New rules - RNA-SeQC working files (G12, G12b, A10, A10b), Cell Ranger BAMs (G14, A11), external alignments and tracks (G7b), old BAMs with strong evidence of raw data (G13), old bigWig tracks (G15), Bismark context files (A12). Nextflow stage folders count as work folders. External accessions also cover ERR, DRR, SRX, ERX, GSM, PRJNA and PRJEB; a lab run ID in the path stops a file counting as external. BAM names such as x.fastq.gz_trimmed_bismark_bt2.bam now match their sample. Code and installed software no longer trigger the sensitivity suspicion check. Each file also gets a reproducibility tier; rules marked repro_gate go green only in a tier the committee has approved, and otherwise become A13. Alignments with no source (R2) are amber, not red. Holds on anything other than raw data show amber rather than red. From the all-researcher scans, imaging formats .ets, .im3, .dcm and .dax are protected instrument data, and encrypted downloads (.c4gh, .ncbi_enc) count as controlled. File names holding a tab no longer stop a scan being read in full. Added the retention requirements, retention matrix, privacy table and per-project data category, with required-record and legal-hold declarations in the register.
   0.6.2: IGV TDF tracks are green (G10); MISO per-event files are green with a MISO summary in the project (G11), otherwise amber (A8); coverage files are amber (A9).
   0.6.1: All SAM files are green (G2), with or without a BAM or FASTQ of the same sample; rule A3b removed. Sensitive projects still turn them amber.
@@ -78,8 +80,8 @@ conditions:
   project_active: Project changed within the last {active_months} months (newest file, ignoring tool caches).
   project_has_code: Project contains scripts or a pipeline (any file matching rule P1).
   project_has_reads: Project still contains FASTQ files - raw or trimmed - to regenerate alignments from.
-  repo_match: A file with the same name AND exact byte size exists in the sequencing repository list.
-  project_repo_pct_ok: At least {repo_match_pct} % of the project's raw FASTQ bytes match the repository.
+  repo_match: A file with the same name AND exact byte size exists in an archive area (the sequencing repository /pipeline/Archives, /pipeline/Runs, /dawson_mediaflux, /home/outsourced_fastq_runs).
+  project_repo_pct_ok: At least {repo_match_pct} % of the project's raw FASTQ bytes match an archive area.
   miso_has_summary: The project holds a MISO summary file (.miso_summary).
   external_fastq: A FASTQ whose origin is external - a folder starting with capital GSE (including the project's own folder), a name starting with capital SRR, or a public accession anywhere in the path - with no lab run ID in the path. Unlike other patterns, case matters here.
   external_derived: A BAM, CRAM, index or track whose origin is external (as above), in a folder that has been idle for {byproduct_idle_months} months.
@@ -453,10 +455,11 @@ rules:
     why: The deduplicated BAM has fewer reads; the original can usually be regenerated from raw data.
     caveat: Not a pure copy - some analyses need the reads that were removed.
 
-  - id: A4b
-    colour: amber
+  - id: G16
+    colour: green
     category: redundant
-    title: Uncompressed files that also exist compressed
+    sensitive_ok: true
+    title: Uncompressed files that also exist compressed (was A4b)
     match:
       requires: [has_compressed_copy]
     why: e.g. x.fastq next to x.fastq.gz, x.vcf next to x.vcf.gz - same content, stored twice.
@@ -561,18 +564,19 @@ rules:
   - id: G4
     colour: green
     category: redundant
-    title: Raw FASTQ in a project that is (almost) fully in the repository
+    sensitive_ok: true
+    title: Raw FASTQ in a project that is (almost) fully held in an archive area
     match:
       ext: [.fastq, .fq]
       name_regex: '^(?!.*@trimmed_fastq)'
       requires: [repo_match, project_repo_pct_ok]
-    why: The same file name with the exact same size exists in the sequencing repository, and so does at least {repo_match_pct} % of this project's raw data.
+    why: The same file name with the exact same size exists in an archive area (sequencing repository, Mediaflux or outsourced runs), and so does at least {repo_match_pct} % of this project's raw data.
     caveat: Name + size is strong evidence but not proof of identical content (no checksums). Requires the repository copy to be retained long-term - to be confirmed by the sequencing facility.
 
   - id: A1
     colour: amber
     category: redundant
-    title: Raw FASTQ found in the repository, in a project that is only partly there
+    title: Raw FASTQ found in an archive area, in a project that is only partly there
     match:
       ext: [.fastq, .fq]
       name_regex: '^(?!.*@trimmed_fastq)'
